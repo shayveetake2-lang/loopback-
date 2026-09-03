@@ -160,9 +160,7 @@ async function getInbox() {
 
 async function refreshUnreadCount() {
   try {
-    const unreadCount = (await getInbox()).reduce((total, conversation) => total + conversation.unreadCount, 0);
-    const badge = document.querySelector('#unread-count');
-    if (badge) badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+    setUnreadBadge(await getInbox());
   } catch (error) {
     console.error('Unread count error:', error);
   }
@@ -752,8 +750,6 @@ function bootstrap() {
   });
   accountBar();
   const header = document.querySelector('header');
-  if (header && !document.querySelector('#messages-button')) header.insertAdjacentHTML('beforeend', '<button id="messages-button" class="glass hidden rounded-xl px-3 py-2 text-xs font-bold text-slate-300 hover:border-fuchsia-400/50 lg:inline-flex">Messages <span data-unread-count class="ml-1 rounded-full bg-fuchsia-500 px-1.5 py-0.5 text-[10px] text-white">0</span></button>');
-  document.querySelector('#messages-button')?.addEventListener('click', messagesMenu);
   refreshUnreadCount();
   if (header && !document.querySelector('#welcome-section')) header.insertAdjacentHTML('afterend', '<section id="welcome-section" class="glass mb-6 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/5 p-5 sm:p-6"><div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between"><div><div class="text-[10px] font-bold uppercase tracking-[.2em] text-fuchsia-300">A better way to stay close</div><h2 class="mt-2 font-display text-2xl font-bold">Welcome to your relationship orbit.</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">LoopBack helps you remember the people who matter, notice when a connection needs care, and start your next conversation with confidence.</p></div><button id="welcome-help" class="shrink-0 rounded-xl border border-fuchsia-400/30 px-3 py-2 text-xs font-bold text-fuchsia-200 hover:bg-fuchsia-400/10">Explore the guide</button></div><div class="mt-5 grid gap-3 sm:grid-cols-3"><div class="rounded-xl bg-white/[.045] p-3"><div class="text-sm font-bold text-slate-200">Remember</div><p class="mt-1 text-xs leading-5 text-slate-500">Keep useful context in one calm place.</p></div><div class="rounded-xl bg-white/[.045] p-3"><div class="text-sm font-bold text-slate-200">Notice</div><p class="mt-1 text-xs leading-5 text-slate-500">See who may appreciate a thoughtful hello.</p></div><div class="rounded-xl bg-white/[.045] p-3"><div class="text-sm font-bold text-slate-200">Reconnect</div><p class="mt-1 text-xs leading-5 text-slate-500">Turn a reminder into a personal message.</p></div></div></section>');
   document.querySelector('#welcome-help')?.addEventListener('click', () => helpPage());
@@ -764,22 +760,21 @@ function bootstrap() {
   if (workspaceNav && !document.querySelector('#menu-messages-button')) workspaceNav.insertAdjacentHTML('beforeend', '<button id="menu-messages-button" class="menu-messages-button nav-item w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-300"><span class="grid h-5 w-5 place-items-center rounded-md bg-white/10 text-[11px]">✉</span>Messages <span data-unread-count class="ml-auto rounded-full bg-fuchsia-500 px-1.5 py-0.5 text-[10px] text-white">0</span></button>');
   const existingMenuToggle = document.querySelector('#mobile-menu-toggle');
   if (!existingMenuToggle) {
-    document.body.insertAdjacentHTML('beforeend', '<div id="mobile-actions" class="fixed left-4 top-4 z-20 flex items-center gap-2 lg:hidden"><button id="mobile-menu-toggle" type="button" class="glass flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-slate-300" aria-controls="workspace-sidebar" aria-expanded="false"><span class="text-base leading-none">☰</span> Menu</button><button id="mobile-messages-button" type="button" class="glass rounded-xl px-3 py-2 text-xs font-bold text-slate-300" aria-label="Open messages">Messages <span data-unread-count class="ml-1 rounded-full bg-fuchsia-500 px-1.5 py-0.5 text-[10px] text-white">0</span></button></div>');
+    document.body.insertAdjacentHTML('beforeend', '<div id="mobile-actions" class="fixed left-4 top-4 z-20 lg:hidden"><button id="mobile-menu-toggle" type="button" class="glass flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-slate-300" aria-controls="workspace-sidebar" aria-expanded="false"><span class="text-base leading-none">☰</span> Menu</button></div>');
   }
   sidebar?.setAttribute('id', 'workspace-sidebar');
   const menuToggle = document.querySelector('#mobile-menu-toggle');
-  document.querySelector('#mobile-messages-button')?.addEventListener('click', messagesMenu);
-  document.querySelector('#menu-messages-button')?.addEventListener('click', () => { closeMobileMenu(); messagesMenu(); });
   const closeMobileMenu = () => {
     sidebar?.classList.add('hidden');
     sidebar?.classList.remove('flex');
     menuToggle?.setAttribute('aria-expanded', 'false');
   };
-  menuToggle?.addEventListener('click', () => {
+  document.querySelector('#menu-messages-button').onclick = () => { closeMobileMenu(); messagesMenu(); };
+  menuToggle.onclick = () => {
     const isOpen = sidebar?.classList.toggle('flex');
     sidebar?.classList.toggle('hidden', !isOpen);
     menuToggle.setAttribute('aria-expanded', String(Boolean(isOpen)));
-  });
+  };
   document.querySelector('#close-drawer')?.addEventListener('click', () => {
     drawer.classList.add('closed');
     document.querySelector('#mobile-menu-toggle')?.style.removeProperty('display');
