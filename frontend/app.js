@@ -39,6 +39,8 @@ const tierDefaults = {
 let contacts = [];
 let session = JSON.parse(localStorage.getItem('loopback-session') || 'null');
 let stopMessageListener = null;
+let loadRequestId = 0;
+let filterTimer = null;
 
 const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -222,14 +224,19 @@ function openChat(user) {
   document.body.insertAdjacentHTML('beforeend', `<div id="chat-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass flex h-[min(680px,calc(100vh-40px))] w-full max-w-lg flex-col rounded-3xl p-5"><div class="flex items-center justify-between border-b border-white/10 pb-4"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Private conversation</div><h2 class="mt-1 font-display text-xl font-bold">${esc(user.name)}</h2></div><button id="close-chat" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div id="chat-messages" class="flex-1 space-y-3 overflow-y-auto py-5"><div class="text-center text-xs text-slate-500">Loading messages...</div></div><form id="chat-form" class="flex gap-2 border-t border-white/10 pt-4"><label class="sr-only" for="chat-input">Message</label><input id="chat-input" required maxlength="2000" placeholder="Write a message" class="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"><button class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-3 text-xs font-extrabold text-white">Send</button></form></section></div>`);
   const conversationId = chatId(currentUser.uid, user.id);
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-  setDoc(doc(db, 'conversations', conversationId), { participants: [currentUser.uid, user.id], participantNames: { [currentUser.uid]: session.user.name, [user.id]: user.name }, updatedAt: new Date().toISOString() }, { merge: true });
+  setDoc(doc(db, 'conversations', conversationId), { participants: [currentUser.uid, user.id], participantNames: { [currentUser.uid]: session.user.name, [user.id]: user.name }, updatedAt: new Date().toISOString() }, { merge: true }).catch((error) => console.error('Conversation setup error:', error));
   stopMessageListener?.();
   stopMessageListener = onSnapshot(query(messagesRef, orderBy('createdAt')), (snapshot) => {
     const messages = snapshot.docs.map((item) => item.data());
     document.querySelector('#chat-messages').innerHTML = messages.length ? messages.map((message) => `<div class="flex ${message.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm ${message.senderId === currentUser.uid ? 'bg-fuchsia-500/20 text-fuchsia-50' : 'bg-white/10 text-slate-200'}"><p>${esc(message.text)}</p><div class="mt-1 text-[10px] text-slate-500">${esc(message.senderName)}</div></div></div>`).join('') : '<div class="text-center text-xs text-slate-500">No messages yet. Start the conversation.</div>';
     const messageBox = document.querySelector('#chat-messages');
     messageBox.scrollTop = messageBox.scrollHeight;
-  }, (error) => { console.error('Message listener error:', error); showNotice('Could not load this conversation.'); });
+  }, (error) => {
+    console.error('Message listener error:', error);
+    const messageBox = document.querySelector('#chat-messages');
+    if (messageBox) messageBox.innerHTML = '<div class="space-y-3 text-center text-xs text-rose-200"><p>Could not load this conversation.</p><button id="retry-chat" class="rounded-lg border border-rose-300/30 px-3 py-2 font-bold hover:bg-white/10">Retry</button></div>';
+    document.querySelector('#retry-chat')?.addEventListener('click', () => openChat(user));
+  });
   document.querySelector('#close-chat').addEventListener('click', () => { stopMessageListener?.(); stopMessageListener = null; document.querySelector('#chat-modal')?.remove(); });
   document.querySelector('#chat-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -437,9 +444,15 @@ function card(contact) {
 }
 
 async function load(filter = 'all') {
+  const requestId = ++loadRequestId;
+  grid.innerHTML = '<div class="glass rounded-2xl p-6 text-sm text-slate-400">Loading your orbit...</div>';
+  const timeout = new Promise((resolve, reject) => setTimeout(() => reject(new Error('Contact loading timed out.')), 8000));
   try {
-    await ensureSeedData();
-    const snapshot = await getDocs(collection(db, 'contacts'));
+    const snapshot = await Promise.race([
+      (async () => { await ensureSeedData(); return getDocs(collection(db, 'contacts')); })(),
+      timeout,
+    ]);
+    if (requestId !== loadRequestId) return;
     contacts = snapshot.docs.map((docSnap) => docSnap.data()).map(driftFor);
     const visible = filter === 'alerts' ? contacts.filter((item) => item.is_overdue) : contacts;
     const urgent = contacts.filter((item) => item.is_overdue);
@@ -453,11 +466,21 @@ async function load(filter = 'all') {
     document.querySelector('#total-stat').textContent = contacts.length;
     document.querySelector('#follow-stat').textContent = urgent.length;
     document.querySelector('#contact-summary').textContent = `${contacts.length} contacts`;
+    const synced = document.querySelector('#last-synced');
+    if (synced) synced.textContent = `Synced ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
     document.querySelectorAll('.loop-in').forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.contact)));
   } catch (error) {
     console.error(error);
-    showNotice('Could not load your contacts from Firebase.');
+    if (requestId !== loadRequestId) return;
+    const message = error.message === 'Contact loading timed out.' ? 'Firebase is taking longer than expected.' : 'Could not load your contacts from Firebase.';
+    grid.innerHTML = `<div class="glass rounded-2xl border border-rose-400/20 p-6 text-sm text-rose-200"><p>${message}</p><button id="retry-contacts" class="mt-3 rounded-lg border border-rose-300/30 px-3 py-2 text-xs font-bold hover:bg-white/10">Try again</button></div>`;
+    document.querySelector('#retry-contacts')?.addEventListener('click', () => load(filter));
   }
+}
+
+function requestFilter(filter) {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => load(filter), 180);
 }
 
 function generateIcebreaker(contact) {
@@ -524,7 +547,7 @@ function captureMessage() {
     await updateDoc(doc(db, 'contacts', id), { interactions: [...(contact.interactions || []), interaction], last_interaction_date: interaction.date, last_topic: note.slice(0, 100) });
     document.querySelector('#capture-modal').remove();
     showNotice('Interaction saved to Firebase.', 'success');
-    load();
+    requestFilter('all');
   });
 }
 
@@ -534,6 +557,7 @@ async function openDrawer(id) {
 
   const messageDraft = generateIcebreaker(contact);
   drawer.classList.remove('closed');
+  document.querySelector('#mobile-menu-toggle')?.style.setProperty('display', 'none', 'important');
   drawerContent.innerHTML = `
     <div class="flex items-center gap-3">
       <img class="h-14 w-14 rounded-full border-2 border-fuchsia-400/40 object-cover" src="${esc(contact.avatar_url)}" alt="${esc(contact.name)}">
@@ -640,7 +664,27 @@ async function adminPanel() {
 
 function bootstrap() {
   accountBar();
-  document.querySelector('#close-drawer')?.addEventListener('click', () => drawer.classList.add('closed'));
+  const sidebar = document.querySelector('aside');
+  const existingMenuToggle = document.querySelector('#mobile-menu-toggle');
+  if (!existingMenuToggle) {
+    document.body.insertAdjacentHTML('beforeend', '<button id="mobile-menu-toggle" type="button" class="glass fixed left-4 top-4 z-20 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-slate-300 lg:hidden" aria-controls="workspace-sidebar" aria-expanded="false"><span class="text-base leading-none">☰</span> Menu</button>');
+  }
+  sidebar?.setAttribute('id', 'workspace-sidebar');
+  const menuToggle = document.querySelector('#mobile-menu-toggle');
+  const closeMobileMenu = () => {
+    sidebar?.classList.add('hidden');
+    sidebar?.classList.remove('flex');
+    menuToggle?.setAttribute('aria-expanded', 'false');
+  };
+  menuToggle?.addEventListener('click', () => {
+    const isOpen = sidebar?.classList.toggle('flex');
+    sidebar?.classList.toggle('hidden', !isOpen);
+    menuToggle.setAttribute('aria-expanded', String(Boolean(isOpen)));
+  });
+  document.querySelector('#close-drawer')?.addEventListener('click', () => {
+    drawer.classList.add('closed');
+    document.querySelector('#mobile-menu-toggle')?.style.removeProperty('display');
+  });
   document.querySelector('#refresh')?.addEventListener('click', () => load());
   document.querySelector('#capture-message')?.addEventListener('click', captureMessage);
   document.querySelector('#new-message')?.addEventListener('click', newMessage);
@@ -657,14 +701,16 @@ function bootstrap() {
   nav[0]?.addEventListener('click', () => {
     nav.forEach((item) => item.classList.remove('active'));
     nav[0].classList.add('active');
+    closeMobileMenu();
     load();
   });
   nav[1]?.addEventListener('click', () => {
     nav.forEach((item) => item.classList.remove('active'));
     nav[1].classList.add('active');
-    load('alerts');
+    closeMobileMenu();
+    requestFilter('alerts');
   });
-  nav[2]?.addEventListener('click', settingsMenu);
+  nav[2]?.addEventListener('click', () => { closeMobileMenu(); settingsMenu(); });
 
   load();
 }
