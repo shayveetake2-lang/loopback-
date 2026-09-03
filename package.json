@@ -4,7 +4,11 @@
   "type": "module",
   "scripts": {
     "check": "node --check frontend/app.js",
+    "build": "tailwindcss -c tailwind.config.js -i frontend/input.css -o frontend/styles.css --minify",
     "serve": "npx serve frontend",
-    "deploy": "firebase deploy --only hosting,firestore:rules"
+    "deploy": "npm run build && firebase deploy --only hosting,firestore:rules"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
   }
 }
