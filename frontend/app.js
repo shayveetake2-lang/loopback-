@@ -399,7 +399,7 @@ async function adminPanel() {
             </div>
             <button id="close-admin" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button>
           </div>
-          <div class="overflow-hidden rounded-xl border border-white/10">
+          <div class="overflow-x-auto rounded-xl border border-white/10">
             <div class="grid grid-cols-[1fr_1fr_110px_90px] gap-3 border-b border-white/10 bg-white/[.04] px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
               <span>Account</span><span>Created</span><span>Role</span><span>Recovery</span>
             </div>
