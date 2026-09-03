@@ -460,11 +460,12 @@ async function adminPanel() {
             </div>
             <button id="close-admin" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button>
           </div>
+          <label class="mb-4 block text-xs font-bold text-slate-400">Search users<input id="user-search" type="search" placeholder="Search by name, email, or ID" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label>
           <div class="overflow-x-auto rounded-xl border border-white/10">
             <div class="grid grid-cols-[1fr_1fr_110px_90px] gap-3 border-b border-white/10 bg-white/[.04] px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
               <span>Account</span><span>Created</span><span>Role</span><span>Recovery</span>
             </div>
-            ${users.map((user) => `
+            <div id="user-results">${users.map((user) => `
               <div class="grid grid-cols-[1fr_1fr_110px_90px] items-center gap-3 border-b border-white/5 px-4 py-3 text-xs last:border-0">
                 <div>
                   <div class="font-semibold text-slate-200">${esc(user.name)}</div>
@@ -476,30 +477,34 @@ async function adminPanel() {
                   <option ${user.role === 'admin' ? 'selected' : ''} value="admin">Admin</option>
                 </select>
                 <button data-reset-user="${esc(user.email)}" class="rounded-lg border border-white/10 px-2 py-2 text-[10px] font-bold text-slate-400 hover:text-white">Reset password</button>
-              </div>`).join('')}
+              </div>`).join('')}</div>
           </div>
         </div>
       </div>
     `);
 
     document.querySelector('#close-admin').addEventListener('click', () => document.querySelector('#admin-modal').remove());
-    document.querySelectorAll('[data-role-user]').forEach((select) => {
-      select.addEventListener('change', async () => {
-        const userId = select.dataset.roleUser;
-        await updateDoc(doc(db, 'users', userId), { role: select.value });
+    const renderUsers = (query = '') => {
+      const normalizedQuery = query.trim().toLowerCase();
+      const matches = users.filter((user) => [user.name, user.email, user.id].some((value) => String(value || '').toLowerCase().includes(normalizedQuery)));
+      document.querySelector('#user-results').innerHTML = matches.length ? matches.map((user) => `
+        <div class="grid grid-cols-[1fr_1fr_110px_90px] items-center gap-3 border-b border-white/5 px-4 py-3 text-xs last:border-0">
+          <div><div class="font-semibold text-slate-200">${esc(user.name)}</div><div class="text-[10px] text-slate-500">${esc(user.email)}</div></div>
+          <span class="text-slate-500">${esc(user.created_at || '—')}</span>
+          <select data-role-user="${esc(user.id)}" class="rounded-lg border border-white/10 bg-black/20 px-2 py-2 text-[10px] text-slate-300"><option ${user.role === 'member' ? 'selected' : ''} value="member">Member</option><option ${user.role === 'admin' ? 'selected' : ''} value="admin">Admin</option></select>
+          <button data-reset-user="${esc(user.email)}" class="rounded-lg border border-white/10 px-2 py-2 text-[10px] font-bold text-slate-400 hover:text-white">Reset password</button>
+        </div>`).join('') : '<div class="px-4 py-5 text-sm text-slate-500">No matching users.</div>';
+      document.querySelectorAll('[data-role-user]').forEach((select) => select.addEventListener('change', async () => {
+        await updateDoc(doc(db, 'users', select.dataset.roleUser), { role: select.value });
         showNotice('User role updated.', 'success');
-      });
-    });
-    document.querySelectorAll('[data-reset-user]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        try {
-          await sendPasswordResetEmail(auth, button.dataset.resetUser);
-          showNotice('Password reset email sent.', 'success');
-        } catch (error) {
-          showNotice(error.message || 'Could not send password reset email.');
-        }
-      });
-    });
+      }));
+      document.querySelectorAll('[data-reset-user]').forEach((button) => button.addEventListener('click', async () => {
+        try { await sendPasswordResetEmail(auth, button.dataset.resetUser); showNotice('Password reset email sent.', 'success'); }
+        catch (error) { showNotice(error.message || 'Could not send password reset email.'); }
+      }));
+    };
+    renderUsers();
+    document.querySelector('#user-search').addEventListener('input', (event) => renderUsers(event.target.value));
   } catch (error) {
     showNotice('Admin access is unavailable right now.');
   }
