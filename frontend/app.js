@@ -59,73 +59,6 @@ const tone = (tier) =>
       ? 'text-violet-200 bg-violet-400/10 border-violet-400/20'
       : 'text-slate-300 bg-white/5 border-white/10';
 
-const sampleContacts = [
-  {
-    id: 'maya-chen',
-    name: 'Maya Chen',
-    avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=160&h=160&fit=crop',
-    last_interaction_date: '2026-08-29',
-    last_topic: 'Discussed moving to Austin',
-    relationship_tier: 'Inner Loop',
-    custom_cadence_days: 14,
-    role: 'Creative Director',
-    company: 'Arc Studio',
-    location: 'Brooklyn, NY',
-    interactions: [
-      { date: '2026-08-29', type: 'Dinner', note: 'Discussed moving to Austin and a tiny natural wine bar in Alfama.' },
-    ],
-    deals: ['Lisbon residency intro', 'Arc Studio portfolio review'],
-  },
-  {
-    id: 'jon-bell',
-    name: 'Jon Bell',
-    avatar_url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=160&h=160&fit=crop',
-    last_interaction_date: '2026-07-20',
-    last_topic: 'Talked about his new startup pitch',
-    relationship_tier: 'Mid Loop',
-    custom_cadence_days: 60,
-    role: 'Founder',
-    company: 'Northstar Labs',
-    location: 'Austin, TX',
-    interactions: [
-      { date: '2026-07-20', type: 'Coffee', note: 'Talked about his new startup pitch and hiring the first PM.' },
-    ],
-    deals: ['Intro to Priya at Fieldwork', 'Northstar beta feedback'],
-  },
-  {
-    id: 'alina-ross',
-    name: 'Alina Ross',
-    avatar_url: 'https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=160&h=160&fit=crop',
-    last_interaction_date: '2026-07-20',
-    last_topic: 'Met at TechX Conference',
-    relationship_tier: 'Mid Loop',
-    custom_cadence_days: 60,
-    role: 'Product Lead',
-    company: 'Polymath',
-    location: 'London, UK',
-    interactions: [
-      { date: '2026-07-20', type: 'Conference', note: 'Met at TechX Conference after her talk on humane product rituals.' },
-    ],
-    deals: ['Product ritual roundtable'],
-  },
-  {
-    id: 'samir-patel',
-    name: 'Samir Patel',
-    avatar_url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=160&h=160&fit=crop',
-    last_interaction_date: '2026-05-26',
-    last_topic: 'Shared his neighborhood mutual-aid project',
-    relationship_tier: 'Outer Loop',
-    custom_cadence_days: 120,
-    role: 'Independent Operator',
-    company: 'Independent',
-    location: 'Chicago, IL',
-    interactions: [
-      { date: '2026-05-26', type: 'Lunch', note: 'Shared his neighborhood mutual-aid project and the bike trip he was planning.' },
-    ],
-    deals: ['Mutual-aid toolkit share'],
-  },
-];
-
 function showNotice(message, kind = 'error') {
   const notice = document.querySelector('#app-notice');
   if (!notice) return;
@@ -152,18 +85,7 @@ function driftFor(contact) {
 }
 
 async function ensureSeedData() {
-  try {
-    const snapshot = await getDocs(collection(db, 'contacts'));
-    if (!snapshot.empty) return;
-    const batch = writeBatch(db);
-    sampleContacts.forEach((contact) => {
-      const docRef = doc(collection(db, 'contacts'), contact.id);
-      batch.set(docRef, contact);
-    });
-    await batch.commit();
-  } catch (error) {
-    console.error('Seed data error:', error);
-  }
+  return null;
 }
 
 async function getUserProfile(uid) {
@@ -662,6 +584,12 @@ async function adminPanel() {
   }
 }
 
+function helpMenu() {
+  document.querySelector('#help-modal')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="help-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass max-h-[min(760px,calc(100vh-40px))] w-full max-w-2xl overflow-y-auto rounded-3xl p-6"><div class="mb-6 flex items-start justify-between gap-4"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">LoopBack guide</div><h2 class="mt-1 font-display text-2xl font-bold">How to use the app</h2><p class="mt-2 text-sm text-slate-400">Keep your real contacts, context, and conversations in one place.</p></div><button id="close-help" class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div class="grid gap-4 sm:grid-cols-2"><article class="rounded-2xl bg-white/[.045] p-4"><h3 class="font-display font-bold text-fuchsia-200">1. Create an account</h3><p class="mt-2 text-xs leading-5 text-slate-400">Choose a unique username, email, and password. You can sign in later with either the username or email.</p></article><article class="rounded-2xl bg-white/[.045] p-4"><h3 class="font-display font-bold text-fuchsia-200">2. Add contacts</h3><p class="mt-2 text-xs leading-5 text-slate-400">Use Import CSV to add people to your relationship list. Include name, last interaction date, topic, tier, cadence, role, company, location, and optional avatar URL.</p></article><article class="rounded-2xl bg-white/[.045] p-4"><h3 class="font-display font-bold text-fuchsia-200">3. Understand the dashboard</h3><p class="mt-2 text-xs leading-5 text-slate-400">All Contacts shows your list. Drift Alerts filters people whose follow-up cadence has passed. Drift is calculated from the last interaction, tier, and cadence.</p></article><article class="rounded-2xl bg-white/[.045] p-4"><h3 class="font-display font-bold text-fuchsia-200">4. Message a user</h3><p class="mt-2 text-xs leading-5 text-slate-400">Search the user directory in the left panel or choose Write a new message. Select a registered LoopBack user to open a private conversation and send messages through Firebase.</p></article><article class="rounded-2xl bg-white/[.045] p-4"><h3 class="font-display font-bold text-fuchsia-200">5. Log an interaction</h3><p class="mt-2 text-xs leading-5 text-slate-400">Capture message saves an important Messenger, Snapchat, phone, or other note to a contact and updates the last interaction date and topic.</p></article><article class="rounded-2xl bg-white/[.045] p-4"><h3 class="font-display font-bold text-fuchsia-200">6. Manage your account</h3><p class="mt-2 text-xs leading-5 text-slate-400">Settings updates your display name and sends password reset emails. Admin panel is available only to administrators for user roles and recovery.</p></article></div><div class="mt-5 rounded-2xl border border-violet-400/20 bg-violet-500/5 p-4"><h3 class="font-display font-bold text-violet-200">CSV columns</h3><p class="mt-2 text-xs leading-5 text-slate-400">Required: name. Optional: avatar_url, last_interaction_date, last_topic, relationship_tier, custom_cadence_days, role, company, location. Use Inner Loop, Mid Loop, or Outer Loop for relationship tiers.</p></div></section></div>`);
+  document.querySelector('#close-help').addEventListener('click', () => document.querySelector('#help-modal').remove());
+}
+
 function bootstrap() {
   accountBar();
   const sidebar = document.querySelector('aside');
@@ -711,6 +639,7 @@ function bootstrap() {
     requestFilter('alerts');
   });
   nav[2]?.addEventListener('click', () => { closeMobileMenu(); settingsMenu(); });
+  nav[3]?.addEventListener('click', () => { closeMobileMenu(); helpMenu(); });
 
   load();
 }
