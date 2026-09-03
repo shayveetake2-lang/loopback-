@@ -125,6 +125,24 @@ async function resolveLoginEmail(identifier) {
 
 async function syncUserDirectory(profile, uid) {
   await setDoc(doc(db, 'userDirectory', uid), { id: uid, name: profile.name || 'User', email: profile.email || '' }, { merge: true });
+  if (profile.role === 'admin') await setDoc(doc(db, 'adminDirectory', uid), { id: uid, name: profile.name || 'Administrator', email: profile.email || '' }, { merge: true });
+}
+
+async function contactAdmin() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+  try {
+    const snapshot = await getDocs(collection(db, 'adminDirectory'));
+    const administrator = snapshot.docs.map((item) => item.data()).find((user) => user.id !== currentUser.uid);
+    if (!administrator) {
+      showNotice('No other administrator is available to contact right now.');
+      return;
+    }
+    openChat(administrator);
+  } catch (error) {
+    console.error('Contact admin error:', error);
+    showNotice('Could not find an administrator. Try again.');
+  }
 }
 
 async function searchUsers(query) {
@@ -780,6 +798,7 @@ function bootstrap() {
   const sidebar = document.querySelector('aside');
   const workspaceNav = sidebar?.querySelector('nav');
   if (workspaceNav && !document.querySelector('#menu-messages-button')) workspaceNav.insertAdjacentHTML('beforeend', '<button id="menu-messages-button" class="menu-messages-button nav-item w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-300"><span class="grid h-5 w-5 place-items-center rounded-md bg-white/10 text-[11px]">✉</span>Messages <span data-unread-count class="ml-auto rounded-full bg-fuchsia-500 px-1.5 py-0.5 text-[10px] text-white">0</span></button>');
+  if (workspaceNav && !document.querySelector('#contact-admin-button')) workspaceNav.insertAdjacentHTML('beforeend', '<button id="contact-admin-button" class="nav-item flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-slate-300"><span class="grid h-5 w-5 place-items-center rounded-md bg-white/10 text-[11px]">@</span>Contact admin</button>');
   const existingMenuToggle = document.querySelector('#mobile-menu-toggle');
   if (!existingMenuToggle) {
     document.body.insertAdjacentHTML('beforeend', '<div id="mobile-actions" class="fixed left-4 top-4 z-20 lg:hidden"><button id="mobile-menu-toggle" type="button" class="glass flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-slate-300" aria-controls="workspace-sidebar" aria-expanded="false"><span class="text-base leading-none">☰</span> Menu</button></div>');
@@ -792,6 +811,7 @@ function bootstrap() {
     menuToggle?.setAttribute('aria-expanded', 'false');
   };
   document.querySelector('#menu-messages-button').onclick = () => { closeMobileMenu(); messagesMenu(); };
+  document.querySelector('#contact-admin-button').onclick = () => { closeMobileMenu(); contactAdmin(); };
   menuToggle.onclick = () => {
     const isOpen = sidebar?.classList.toggle('flex');
     sidebar?.classList.toggle('hidden', !isOpen);
