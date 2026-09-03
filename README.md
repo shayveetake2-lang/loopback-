@@ -11,6 +11,16 @@ npx serve frontend
 
 The frontend app uses Firebase Authentication and Firestore directly in the browser.
 
+## Import contacts and capture messages
+
+From the signed-in dashboard, **Import CSV** accepts these columns:
+
+```text
+name,avatar_url,last_interaction_date,last_topic,relationship_tier,custom_cadence_days,role,company,location
+```
+
+**Capture message** lets you select a contact, paste an important message from Messenger, Snapchat, SMS, or another app, and save it as an interaction in Firestore. On supported phones, **Open share sheet** can share copied text into the workflow. Private inboxes cannot be pulled automatically by a web app.
+
 ## Firebase setup
 
 1. Create a Firebase project.

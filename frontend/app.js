@@ -339,6 +339,67 @@ function generateIcebreaker(contact) {
   return { casual_warm: casual, professional_direct: professional, draft: contact.relationship_tier === 'Inner Loop' ? casual : professional };
 }
 
+function csvFields(line) {
+  const fields = [];
+  let field = '';
+  let quoted = false;
+  for (const char of line) {
+    if (char === '"') quoted = !quoted;
+    else if (char === ',' && !quoted) { fields.push(field.trim()); field = ''; }
+    else field += char;
+  }
+  fields.push(field.trim());
+  return fields.map((value) => value.replace(/^"|"$/g, '').replace(/""/g, '"'));
+}
+
+async function importContacts(file) {
+  const lines = (await file.text()).split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) throw new Error('CSV must include a header row and at least one contact.');
+  const headers = csvFields(lines.shift()).map((header) => header.toLowerCase().replace(/\s+/g, '_'));
+  const batch = writeBatch(db);
+  let imported = 0;
+  lines.forEach((line) => {
+    const values = csvFields(line);
+    const row = Object.fromEntries(headers.map((header, index) => [header, values[index] || '']));
+    if (!row.name) return;
+    const id = row.id || `${row.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}-${imported}`;
+    const contact = {
+      id, name: row.name, avatar_url: row.avatar_url || '', last_interaction_date: row.last_interaction_date || new Date().toISOString().slice(0, 10),
+      last_topic: row.last_topic || 'Imported contact', relationship_tier: row.relationship_tier || 'Outer Loop',
+      custom_cadence_days: Number(row.custom_cadence_days) || 120, role: row.role || '', company: row.company || '', location: row.location || '', interactions: [], deals: [],
+    };
+    batch.set(doc(db, 'contacts', id), contact, { merge: true });
+    imported += 1;
+  });
+  if (!imported) throw new Error('No contacts with a name were found.');
+  await batch.commit();
+  showNotice(`${imported} contact${imported === 1 ? '' : 's'} imported.`, 'success');
+  load();
+}
+
+function captureMessage() {
+  const options = contacts.map((contact) => `<option value="${esc(contact.id)}">${esc(contact.name)}</option>`).join('');
+  document.body.insertAdjacentHTML('beforeend', `<div id="capture-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><form id="capture-form" class="glass w-full max-w-lg rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><h2 class="font-display text-xl font-bold">Capture a message</h2><button type="button" id="close-capture" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><label class="mb-4 block text-xs font-bold text-slate-400">Contact<select id="capture-contact" required class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white">${options}</select></label><label class="mb-4 block text-xs font-bold text-slate-400">Where did it come from?<select id="capture-source" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white"><option>Messenger</option><option>Snapchat</option><option>Phone</option><option>Other</option></select></label><textarea id="capture-note" required rows="5" placeholder="Paste the important part of the message here" class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></textarea><div class="mt-4 flex flex-wrap justify-end gap-2"><button type="button" id="share-message" class="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-slate-300">Open share sheet</button><button type="submit" class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2 text-xs font-extrabold text-white">Save interaction</button></div></form></div>`);
+  document.querySelector('#close-capture').addEventListener('click', () => document.querySelector('#capture-modal').remove());
+  document.querySelector('#share-message').addEventListener('click', async () => {
+    const text = document.querySelector('#capture-note').value.trim();
+    if (!text) return showNotice('Paste a message first.');
+    if (!navigator.share) return showNotice('Your browser does not support the share sheet. Paste the message here instead.');
+    await navigator.share({ title: 'LoopBack message capture', text });
+  });
+  document.querySelector('#capture-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const id = document.querySelector('#capture-contact').value;
+    const contact = contacts.find((item) => item.id === id);
+    const note = document.querySelector('#capture-note').value.trim();
+    const interaction = { date: new Date().toISOString().slice(0, 10), type: document.querySelector('#capture-source').value, note };
+    await updateDoc(doc(db, 'contacts', id), { interactions: [...(contact.interactions || []), interaction], last_interaction_date: interaction.date, last_topic: note.slice(0, 100) });
+    document.querySelector('#capture-modal').remove();
+    showNotice('Interaction saved to Firebase.', 'success');
+    load();
+  });
+}
+
 async function openDrawer(id) {
   const contact = contacts.find((item) => item.id === id);
   if (!contact) return;
@@ -448,6 +509,14 @@ function bootstrap() {
   accountBar();
   document.querySelector('#close-drawer')?.addEventListener('click', () => drawer.classList.add('closed'));
   document.querySelector('#refresh')?.addEventListener('click', () => load());
+  document.querySelector('#capture-message')?.addEventListener('click', captureMessage);
+  document.querySelector('#import-contacts')?.addEventListener('click', () => document.querySelector('#contact-file')?.click());
+  document.querySelector('#contact-file')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try { await importContacts(file); } catch (error) { showNotice(error.message || 'Could not import contacts.'); }
+    event.target.value = '';
+  });
 
   const nav = [...document.querySelectorAll('.nav-item')];
   nav[0]?.addEventListener('click', () => {
