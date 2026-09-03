@@ -13,6 +13,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
   setDoc,
   updateDoc,
   writeBatch,
@@ -34,6 +38,7 @@ const tierDefaults = {
 
 let contacts = [];
 let session = JSON.parse(localStorage.getItem('loopback-session') || 'null');
+let stopMessageListener = null;
 
 const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -186,9 +191,47 @@ async function searchUsers(query) {
   try {
     const snapshot = await getDocs(collection(db, 'userDirectory'));
     const users = snapshot.docs.map((item) => item.data()).filter((user) => user.id !== auth.currentUser?.uid && [user.name, user.email].some((value) => String(value || '').toLowerCase().includes(normalizedQuery)));
-    results.innerHTML = users.length ? users.slice(0, 8).map((user) => `<a href="mailto:${esc(user.email)}" class="block border-b border-white/5 px-4 py-3 last:border-0 hover:bg-white/5"><div class="text-xs font-bold text-white">${esc(user.name)}</div><div class="text-[10px] text-slate-500">${esc(user.email)}</div><div class="mt-1 text-[10px] font-bold text-fuchsia-300">Send email</div></a>`).join('') : '<div class="px-4 py-3 text-xs text-slate-500">No matching users.</div>';
+    results.innerHTML = users.length ? users.slice(0, 8).map((user) => `<button data-message-user="${esc(user.id)}" class="block w-full border-b border-white/5 px-4 py-3 text-left last:border-0 hover:bg-white/5"><div class="text-xs font-bold text-white">${esc(user.name)}</div><div class="text-[10px] text-slate-500">${esc(user.email)}</div><div class="mt-1 text-[10px] font-bold text-fuchsia-300">Message in LoopBack</div></button>`).join('') : '<div class="px-4 py-3 text-xs text-slate-500">No matching users.</div>';
+    results.querySelectorAll('[data-message-user]').forEach((button) => button.addEventListener('click', () => {
+      const user = users.find((item) => item.id === button.dataset.messageUser);
+      if (user) openChat(user);
+    }));
     results.classList.remove('hidden');
   } catch (error) { console.error('User search error:', error); }
+}
+
+function chatId(firstUserId, secondUserId) {
+  return [firstUserId, secondUserId].sort().join('_');
+}
+
+function openChat(user) {
+  const currentUser = auth.currentUser;
+  if (!currentUser || user.id === currentUser.uid) return;
+  document.querySelector('#user-search-results')?.classList.add('hidden');
+  document.querySelector('#chat-modal')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="chat-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass flex h-[min(680px,calc(100vh-40px))] w-full max-w-lg flex-col rounded-3xl p-5"><div class="flex items-center justify-between border-b border-white/10 pb-4"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Private conversation</div><h2 class="mt-1 font-display text-xl font-bold">${esc(user.name)}</h2></div><button id="close-chat" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div id="chat-messages" class="flex-1 space-y-3 overflow-y-auto py-5"><div class="text-center text-xs text-slate-500">Loading messages...</div></div><form id="chat-form" class="flex gap-2 border-t border-white/10 pt-4"><label class="sr-only" for="chat-input">Message</label><input id="chat-input" required maxlength="2000" placeholder="Write a message" class="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"><button class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-3 text-xs font-extrabold text-white">Send</button></form></section></div>`);
+  const conversationId = chatId(currentUser.uid, user.id);
+  const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+  setDoc(doc(db, 'conversations', conversationId), { participants: [currentUser.uid, user.id], participantNames: { [currentUser.uid]: session.user.name, [user.id]: user.name }, updatedAt: new Date().toISOString() }, { merge: true });
+  stopMessageListener?.();
+  stopMessageListener = onSnapshot(query(messagesRef, orderBy('createdAt')), (snapshot) => {
+    const messages = snapshot.docs.map((item) => item.data());
+    document.querySelector('#chat-messages').innerHTML = messages.length ? messages.map((message) => `<div class="flex ${message.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm ${message.senderId === currentUser.uid ? 'bg-fuchsia-500/20 text-fuchsia-50' : 'bg-white/10 text-slate-200'}"><p>${esc(message.text)}</p><div class="mt-1 text-[10px] text-slate-500">${esc(message.senderName)}</div></div></div>`).join('') : '<div class="text-center text-xs text-slate-500">No messages yet. Start the conversation.</div>';
+    const messageBox = document.querySelector('#chat-messages');
+    messageBox.scrollTop = messageBox.scrollHeight;
+  }, (error) => { console.error('Message listener error:', error); showNotice('Could not load this conversation.'); });
+  document.querySelector('#close-chat').addEventListener('click', () => { stopMessageListener?.(); stopMessageListener = null; document.querySelector('#chat-modal')?.remove(); });
+  document.querySelector('#chat-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.querySelector('#chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try { await addDoc(messagesRef, { text, senderId: currentUser.uid, senderName: session.user.name, createdAt: new Date().toISOString() }); await setDoc(doc(db, 'conversations', conversationId), { updatedAt: new Date().toISOString() }, { merge: true }); input.value = ''; }
+    catch (error) { showNotice(error.message || 'Could not send message.'); }
+    input.disabled = false;
+    input.focus();
+  });
 }
 
 function authScreen() {
