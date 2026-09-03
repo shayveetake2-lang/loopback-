@@ -649,7 +649,41 @@ function helpPage() {
   document.querySelector('#help-page')?.remove();
   const helpTheme = preferences.theme === 'light' ? 'bg-[#f7f9fc] text-[#1f2430]' : 'bg-[#090712] text-white';
   document.body.insertAdjacentHTML('beforeend', `<main id="help-page" class="fixed inset-0 z-40 overflow-y-auto ${helpTheme} p-5 sm:p-10"><div class="mx-auto max-w-4xl"><button id="close-help-page" class="glass mb-8 rounded-xl px-4 py-2 text-xs font-bold text-slate-300">← Back to dashboard</button><div class="mb-10"><div class="text-[10px] font-bold uppercase tracking-[.2em] text-fuchsia-300">LoopBack guide</div><h1 class="mt-2 font-display text-4xl font-bold">How to use LoopBack</h1><p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Use this guide to set up your account, add contacts, stay on top of follow-ups, and message other LoopBack users.</p></div><div class="grid gap-4 sm:grid-cols-2"><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Create an account</h2><p class="mt-2 text-sm leading-6 text-slate-400">Choose a unique username, email, and password. You can sign in with either your username or email later.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Add contacts</h2><p class="mt-2 text-sm leading-6 text-slate-400">Select Import CSV. Your file must include a name column. Add the optional date, topic, relationship tier, cadence, role, company, location, and avatar URL columns when available.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Read your dashboard</h2><p class="mt-2 text-sm leading-6 text-slate-400">All Contacts shows your imported list. Drift Alerts shows contacts whose follow-up cadence has passed. Loop In opens their context and suggested icebreaker.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Message people</h2><p class="mt-2 text-sm leading-6 text-slate-400">Search for a registered user in the sidebar or select Write a new message. Choose a person to open a private conversation backed by Firebase.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Capture interactions</h2><p class="mt-2 text-sm leading-6 text-slate-400">Capture message records an important note from Messenger, Snapchat, phone, or another source and updates the contact's last interaction.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Manage preferences</h2><p class="mt-2 text-sm leading-6 text-slate-400">Settings lets you update your display name, choose light or dark mode, use compact cards, and send a password reset email.</p></article></div><section class="glass mt-4 rounded-2xl p-5"><h2 class="font-display text-lg font-bold">CSV format</h2><p class="mt-2 text-sm leading-6 text-slate-400">Required: name. Optional: avatar_url, last_interaction_date, last_topic, relationship_tier, custom_cadence_days, role, company, location.</p><pre class="mt-4 overflow-x-auto rounded-xl bg-black/20 p-4 text-xs text-fuchsia-200">name,last_interaction_date,last_topic,relationship_tier,custom_cadence_days,role,company,location</pre></section></div></main>`);
-  document.querySelector('#close-help-page').addEventListener('click', () => document.querySelector('#help-page').remove());
+  const helpSurface = document.querySelector('#help-page');
+  helpSurface.style.backgroundColor = preferences.theme === 'light' ? '#f7f9fc' : '#090712';
+  helpSurface.style.backgroundImage = preferences.theme === 'light'
+    ? 'linear-gradient(135deg, #f7f9fc 0%, #e8edf5 100%)'
+    : 'linear-gradient(135deg, #0b0817 0%, #120b28 48%, #080710 100%)';
+  const explanations = {
+    'Create an account': 'Think of this like making your own clubhouse name. Pick a username, add your email, and make a password. Your username and email both work when you come back.',
+    'Add contacts': 'A contact is a person you want to remember. Import CSV is like handing LoopBack a small list. Put each person on one row, and make sure every row has a name.',
+    'Read your dashboard': 'All Contacts is your whole people list. Drift Alerts is a gentle reminder that says, "You may want to say hello to this person." Loop In shows the useful things you remember.',
+    'Message people': 'Search for a LoopBack user, pick their name, and a private chat opens. Type your message and press Send. Only the people in that chat can read it.',
+    'Capture interactions': 'When you talk to someone somewhere else, save the important part here. LoopBack remembers the date and topic so your next hello feels personal.',
+    'Manage preferences': 'Settings is your control room. Light mode makes the screen bright, compact cards make the list smaller, and Save changes remembers your choices.',
+  };
+  helpSurface.querySelectorAll('article').forEach((article) => {
+    const heading = article.querySelector('h2');
+    const explanation = explanations[heading?.textContent.trim()];
+    if (!heading || !explanation) return;
+    article.setAttribute('role', 'button');
+    article.setAttribute('tabindex', '0');
+    article.setAttribute('aria-expanded', 'false');
+    const detail = document.createElement('p');
+    detail.className = 'help-detail mt-3 hidden border-t border-white/10 pt-3 text-sm leading-6 text-fuchsia-100';
+    detail.textContent = explanation;
+    article.append(detail);
+    const toggle = () => {
+      const expanded = article.getAttribute('aria-expanded') === 'true';
+      article.setAttribute('aria-expanded', String(!expanded));
+      detail.classList.toggle('hidden', expanded);
+    };
+    article.addEventListener('click', toggle);
+    article.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
+    });
+  });
+  document.querySelector('#close-help-page').addEventListener('click', () => helpSurface.remove());
 }
 
 function bootstrap() {
