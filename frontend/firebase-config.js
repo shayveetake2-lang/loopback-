@@ -1,8 +1,9 @@
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID",
+  apiKey: "AIzaSyDvfV1REwtCdkNm6lk09s0-4k2-XJa2VX4",
+  authDomain: "loopback-e32c5.firebaseapp.com",
+  projectId: "loopback-e32c5",
+  storageBucket: "loopback-e32c5.firebasestorage.app",
+  messagingSenderId: "466339051117",
+  appId: "1:466339051117:web:7251b442883376fe193164",
+  measurementId: "G-E2VPHFVNLZ",
 };
