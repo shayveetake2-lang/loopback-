@@ -88,6 +88,6 @@ Last topic: {contact.last_topic}
 Rules: reference the last topic naturally, avoid generic networking language, ask one easy-to-answer question, and never mention that you are an AI. Use Casual/Warm for Inner Loop; use Professional/Direct for Mid Loop and Outer Loop.
 Return only the two message options labeled Casual/Warm and Professional/Direct."""
     first_name = contact.name.split()[0]
-    casual = f"Hey {first_name} — I was thinking about {contact.last_topic.lower()}. How has that been unfolding?"
-    professional = f"Hi {first_name}, following up on {contact.last_topic.lower()}. How is that progressing on your end?"
+    casual = f"Hey {first_name} — I was thinking about our conversation: {contact.last_topic}. How has that been unfolding?"
+    professional = f"Hi {first_name}, I enjoyed our conversation around {contact.last_topic}. How is that progressing on your end?"
     return {"contact_id": contact.id, "prompt": system_prompt, "options": {"casual_warm": casual, "professional_direct": professional}, "draft": casual if contact.relationship_tier == "Inner Loop" else professional}
