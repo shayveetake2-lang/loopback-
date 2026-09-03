@@ -58,6 +58,10 @@ service cloud.firestore {
         allow create: if signedIn()
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
           && request.resource.data.senderId == request.auth.uid;
+        allow update: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+          && request.resource.data.senderId == resource.data.senderId
+          && request.resource.data.text == resource.data.text;
       }
     }
   }

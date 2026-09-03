@@ -15,6 +15,7 @@ import {
   getDocs,
   addDoc,
   query,
+  where,
   orderBy,
   onSnapshot,
   setDoc,
@@ -142,6 +143,49 @@ async function searchUsers(query) {
   } catch (error) { console.error('User search error:', error); }
 }
 
+async function getInbox() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return [];
+  const snapshot = await getDocs(query(collection(db, 'conversations'), where('participants', 'array-contains', currentUser.uid)));
+  const conversations = await Promise.all(snapshot.docs.map(async (conversation) => {
+    const data = conversation.data();
+    const messagesSnapshot = await getDocs(query(collection(db, 'conversations', conversation.id, 'messages'), orderBy('createdAt', 'desc')));
+    const messages = messagesSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const unread = messages.filter((message) => message.senderId !== currentUser.uid && !(message.readBy || []).includes(currentUser.uid));
+    const otherUserId = data.participants.find((id) => id !== currentUser.uid);
+    return { id: conversation.id, ...data, otherUserId, otherName: data.participantNames?.[otherUserId] || 'LoopBack user', latest: messages[0], unreadCount: unread.length };
+  }));
+  return conversations.sort((first, second) => String(second.updatedAt || '').localeCompare(String(first.updatedAt || '')));
+}
+
+async function refreshUnreadCount() {
+  try {
+    const unreadCount = (await getInbox()).reduce((total, conversation) => total + conversation.unreadCount, 0);
+    const badge = document.querySelector('#unread-count');
+    if (badge) badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+  } catch (error) {
+    console.error('Unread count error:', error);
+  }
+}
+
+async function messagesMenu() {
+  document.querySelector('#messages-modal')?.remove();
+  document.body.insertAdjacentHTML('beforeend', '<div id="messages-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass flex max-h-[min(700px,calc(100vh-40px))] w-full max-w-2xl flex-col rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Your inbox</div><h2 class="mt-1 font-display text-xl font-bold">Messages</h2></div><button id="close-messages" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div id="inbox-list" class="min-h-32 flex-1 overflow-y-auto"><div class="p-6 text-center text-sm text-slate-500">Loading messages...</div></div></section></div>');
+  document.querySelector('#close-messages').addEventListener('click', () => document.querySelector('#messages-modal').remove());
+  try {
+    const conversations = await getInbox();
+    const list = document.querySelector('#inbox-list');
+    list.innerHTML = conversations.length ? conversations.map((conversation) => `<button data-inbox-conversation="${esc(conversation.id)}" class="flex w-full items-center justify-between gap-4 border-b border-white/10 px-3 py-4 text-left hover:bg-white/5"><span class="min-w-0"><strong class="block truncate text-sm text-white">${esc(conversation.otherName)}</strong><span class="mt-1 block truncate text-xs text-slate-400">${esc(conversation.latest?.text || 'No messages yet')}</span></span>${conversation.unreadCount ? `<span class="grid h-6 min-w-6 place-items-center rounded-full bg-fuchsia-500 px-2 text-[10px] font-bold text-white">${conversation.unreadCount}</span>` : '<span class="text-[10px] text-slate-500">Read</span>'}</button>`).join('') : '<div class="p-6 text-center text-sm text-slate-500">Your inbox is empty.</div>';
+    list.querySelectorAll('[data-inbox-conversation]').forEach((button) => button.addEventListener('click', () => {
+      const conversation = conversations.find((item) => item.id === button.dataset.inboxConversation);
+      if (conversation) { document.querySelector('#messages-modal').remove(); openChat({ id: conversation.otherUserId, name: conversation.otherName }); }
+    }));
+  } catch (error) {
+    console.error('Inbox error:', error);
+    document.querySelector('#inbox-list').innerHTML = '<div class="p-6 text-center text-sm text-rose-200">Could not load messages. Try again.</div>';
+  }
+}
+
 function chatId(firstUserId, secondUserId) {
   return [firstUserId, secondUserId].sort().join('_');
 }
@@ -156,11 +200,13 @@ function openChat(user) {
   const messagesRef = collection(db, 'conversations', conversationId, 'messages');
   setDoc(doc(db, 'conversations', conversationId), { participants: [currentUser.uid, user.id], participantNames: { [currentUser.uid]: session.user.name, [user.id]: user.name }, updatedAt: new Date().toISOString() }, { merge: true }).catch((error) => console.error('Conversation setup error:', error));
   stopMessageListener?.();
-  stopMessageListener = onSnapshot(query(messagesRef, orderBy('createdAt')), (snapshot) => {
+  stopMessageListener = onSnapshot(query(messagesRef, orderBy('createdAt')), async (snapshot) => {
     const messages = snapshot.docs.map((item) => item.data());
     document.querySelector('#chat-messages').innerHTML = messages.length ? messages.map((message) => `<div class="flex ${message.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm ${message.senderId === currentUser.uid ? 'bg-fuchsia-500/20 text-fuchsia-50' : 'bg-white/10 text-slate-200'}"><p>${esc(message.text)}</p><div class="mt-1 text-[10px] text-slate-500">${esc(message.senderName)}</div></div></div>`).join('') : '<div class="text-center text-xs text-slate-500">No messages yet. Start the conversation.</div>';
     const messageBox = document.querySelector('#chat-messages');
     messageBox.scrollTop = messageBox.scrollHeight;
+    await Promise.all(snapshot.docs.filter((item) => item.data().senderId !== currentUser.uid && !(item.data().readBy || []).includes(currentUser.uid)).map((item) => updateDoc(item.ref, { readBy: [...(item.data().readBy || []), currentUser.uid] })));
+    refreshUnreadCount();
   }, (error) => {
     console.error('Message listener error:', error);
     const messageBox = document.querySelector('#chat-messages');
@@ -694,6 +740,9 @@ function bootstrap() {
   });
   accountBar();
   const header = document.querySelector('header');
+  if (header && !document.querySelector('#messages-button')) header.insertAdjacentHTML('beforeend', '<button id="messages-button" class="glass rounded-xl px-3 py-2 text-xs font-bold text-slate-300 hover:border-fuchsia-400/50">Messages <span id="unread-count" class="ml-1 rounded-full bg-fuchsia-500 px-1.5 py-0.5 text-[10px] text-white">0</span></button>');
+  document.querySelector('#messages-button')?.addEventListener('click', messagesMenu);
+  refreshUnreadCount();
   if (header && !document.querySelector('#welcome-section')) header.insertAdjacentHTML('afterend', '<section id="welcome-section" class="glass mb-6 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/5 p-5 sm:p-6"><div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between"><div><div class="text-[10px] font-bold uppercase tracking-[.2em] text-fuchsia-300">A better way to stay close</div><h2 class="mt-2 font-display text-2xl font-bold">Welcome to your relationship orbit.</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">LoopBack helps you remember the people who matter, notice when a connection needs care, and start your next conversation with confidence.</p></div><button id="welcome-help" class="shrink-0 rounded-xl border border-fuchsia-400/30 px-3 py-2 text-xs font-bold text-fuchsia-200 hover:bg-fuchsia-400/10">Explore the guide</button></div><div class="mt-5 grid gap-3 sm:grid-cols-3"><div class="rounded-xl bg-white/[.045] p-3"><div class="text-sm font-bold text-slate-200">Remember</div><p class="mt-1 text-xs leading-5 text-slate-500">Keep useful context in one calm place.</p></div><div class="rounded-xl bg-white/[.045] p-3"><div class="text-sm font-bold text-slate-200">Notice</div><p class="mt-1 text-xs leading-5 text-slate-500">See who may appreciate a thoughtful hello.</p></div><div class="rounded-xl bg-white/[.045] p-3"><div class="text-sm font-bold text-slate-200">Reconnect</div><p class="mt-1 text-xs leading-5 text-slate-500">Turn a reminder into a personal message.</p></div></div></section>');
   document.querySelector('#welcome-help')?.addEventListener('click', () => helpPage());
   if (header && !document.querySelector('#add-contact')) header.insertAdjacentHTML('beforeend', '<button id="add-contact" class="glass rounded-xl px-3 py-2 text-xs font-bold text-slate-300 hover:border-fuchsia-400/50">Add contact</button>');
