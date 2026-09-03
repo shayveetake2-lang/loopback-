@@ -4,11 +4,14 @@
   "type": "module",
   "scripts": {
     "check": "node --check frontend/app.js",
-    "build": "tailwindcss -c tailwind.config.js -i frontend/input.css -o frontend/styles.css --minify",
+    "build": "BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -c tailwind.config.js -i frontend/input.css -o frontend/styles.css --minify",
     "serve": "npx serve frontend",
     "deploy": "npm run build && firebase deploy --only hosting,firestore:rules"
   },
   "devDependencies": {
+    "baseline-browser-mapping": "^2.11.20",
+    "browserslist": "^4.28.8",
+    "caniuse-lite": "^1.0.30001810",
     "tailwindcss": "^3.4.17"
   }
 }
