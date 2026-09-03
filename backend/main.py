@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import secrets
+import sqlite3
 import time
 from datetime import date
 from pathlib import Path
@@ -14,8 +15,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_FILE = ROOT / "data" / "contacts.json"
-USERS_FILE = ROOT / "data" / "users.json"
+DATA_DIR = ROOT / "data"
+DATA_FILE = DATA_DIR / "contacts.json"
+USERS_FILE = DATA_DIR / "users.json"
+DB_PATH = DATA_DIR / "loopback.db"
 TIER_DEFAULTS = {"Inner Loop": {"cadence_days": 14, "weight": 1.5}, "Mid Loop": {"cadence_days": 60, "weight": 1.0}, "Outer Loop": {"cadence_days": 120, "weight": 0.5}}
 TierName = Literal["Inner Loop", "Mid Loop", "Outer Loop"]
 
@@ -66,18 +69,136 @@ security = HTTPBearer(auto_error=False)
 sessions: dict[str, dict[str, object]] = {}
 
 
+@app.on_event("startup")
+def startup_event() -> None:
+    init_db()
+
+
+def get_db_connection() -> sqlite3.Connection:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db() -> None:
+    conn = get_db_connection()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            created_at TEXT NOT NULL DEFAULT CURRENT_DATE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS contacts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            avatar_url TEXT,
+            last_interaction_date TEXT,
+            last_topic TEXT DEFAULT '',
+            relationship_tier TEXT NOT NULL,
+            custom_cadence_days INTEGER NOT NULL,
+            role TEXT DEFAULT '',
+            company TEXT DEFAULT '',
+            location TEXT DEFAULT '',
+            interactions TEXT DEFAULT '[]',
+            deals TEXT DEFAULT '[]'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            expires_at REAL NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0 and USERS_FILE.exists():
+        users = json.loads(USERS_FILE.read_text())
+        if users:
+            conn.executemany(
+                """
+                INSERT INTO users (id, name, email, password_hash, role, created_at)
+                VALUES (:id, :name, :email, :password_hash, :role, :created_at)
+                """,
+                users,
+            )
+
+    if conn.execute("SELECT COUNT(*) FROM contacts").fetchone()[0] == 0 and DATA_FILE.exists():
+        contacts = json.loads(DATA_FILE.read_text())
+        if contacts:
+            conn.executemany(
+                """
+                INSERT INTO contacts (
+                    id, name, avatar_url, last_interaction_date, last_topic,
+                    relationship_tier, custom_cadence_days, role, company, location,
+                    interactions, deals
+                ) VALUES (
+                    :id, :name, :avatar_url, :last_interaction_date, :last_topic,
+                    :relationship_tier, :custom_cadence_days, :role, :company, :location,
+                    :interactions, :deals
+                )
+                """,
+                [
+                    {
+                        **item,
+                        "interactions": json.dumps(item.get("interactions", [])),
+                        "deals": json.dumps(item.get("deals", [])),
+                    }
+                    for item in contacts
+                ],
+            )
+
+    conn.commit()
+    conn.close()
+
+
 def load_contacts() -> list[Contact]:
-    return [Contact.model_validate(item) for item in json.loads(DATA_FILE.read_text())]
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM contacts ORDER BY name").fetchall()
+    conn.close()
+    return [
+        Contact.model_validate(
+            {
+                **dict(row),
+                "interactions": json.loads(row["interactions"] or "[]"),
+                "deals": json.loads(row["deals"] or "[]"),
+            }
+        )
+        for row in rows
+    ]
 
 
 def load_users() -> list[dict[str, object]]:
-    if not USERS_FILE.exists():
-        USERS_FILE.write_text("[]")
-    return json.loads(USERS_FILE.read_text())
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM users ORDER BY created_at, email").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 
 def save_users(users: list[dict[str, object]]) -> None:
-    USERS_FILE.write_text(json.dumps(users, indent=2) + "\n")
+    conn = get_db_connection()
+    conn.execute("DELETE FROM users")
+    conn.executemany(
+        """
+        INSERT INTO users (id, name, email, password_hash, role, created_at)
+        VALUES (:id, :name, :email, :password_hash, :role, :created_at)
+        """,
+        users,
+    )
+    conn.commit()
+    conn.close()
 
 
 def password_hash(password: str, salt: Optional[str] = None) -> str:
