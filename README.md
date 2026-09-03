@@ -11,6 +11,8 @@ npx serve frontend
 
 The frontend app uses Firebase Authentication and Firestore directly in the browser.
 
+Sign-in accepts either an account email or a username. New accounts choose a username during registration; the username is stored in the user profile and its lookup document in Firestore.
+
 ## Import contacts and capture messages
 
 From the signed-in dashboard, **Import CSV** accepts these columns:

@@ -173,11 +173,21 @@ async function getUserProfile(uid) {
   return snapshot.data();
 }
 
-async function saveUserProfile(uid, name, email, role = 'member') {
-  const profile = { id: uid, name, email, role, created_at: new Date().toISOString() };
+async function saveUserProfile(uid, name, email, role = 'member', createdAt = new Date().toISOString()) {
+  const username = String(name || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+  const profile = { id: uid, name, username, email, role, created_at: createdAt };
   await setDoc(doc(db, 'users', uid), profile, { merge: true });
-  await setDoc(doc(db, 'userDirectory', uid), { id: uid, name, email }, { merge: true });
+  await setDoc(doc(db, 'userDirectory', uid), { id: uid, name, username, email }, { merge: true });
+  if (username) await setDoc(doc(db, 'usernames', username), { uid, email });
   return profile;
+}
+
+async function resolveLoginEmail(identifier) {
+  const normalized = identifier.trim().toLowerCase();
+  if (normalized.includes('@')) return normalized;
+  const usernameSnapshot = await getDoc(doc(db, 'usernames', normalized));
+  if (!usernameSnapshot.exists()) throw new Error('No account found for that username.');
+  return usernameSnapshot.data().email;
 }
 
 async function syncUserDirectory(profile, uid) {
@@ -252,12 +262,12 @@ function authScreen() {
         </div>
         <form id="auth-form" class="space-y-4">
           <label id="auth-name-wrap" class="hidden">
-            <span class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-500">Name</span>
-            <input id="auth-name" class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-fuchsia-400/60" autocomplete="name">
+            <span class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-500">Username</span>
+            <input id="auth-name" pattern="[A-Za-z0-9_.-]+" class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-fuchsia-400/60" autocomplete="username">
           </label>
           <label>
-            <span class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-500">Email</span>
-            <input id="auth-email" type="email" required class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-fuchsia-400/60" autocomplete="email">
+            <span class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-500">Email or username</span>
+            <input id="auth-email" required class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-fuchsia-400/60" autocomplete="username" placeholder="you@example.com or username">
           </label>
           <label>
             <span class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-slate-500">Password</span>
@@ -276,6 +286,7 @@ function authScreen() {
     button.addEventListener('click', () => {
       mode = button.dataset.authMode;
       nameWrap.classList.toggle('hidden', mode !== 'register');
+      document.querySelector('#auth-name').required = mode === 'register';
       document.querySelectorAll('.auth-mode').forEach((item) => {
         item.classList.remove('active', 'bg-violet-500/20', 'text-white');
         item.classList.add('text-slate-500');
@@ -287,7 +298,7 @@ function authScreen() {
 
   document.querySelector('#auth-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const email = document.querySelector('#auth-email').value.trim();
+    const identifier = document.querySelector('#auth-email').value.trim();
     const password = document.querySelector('#auth-password').value;
     const name = document.querySelector('#auth-name')?.value.trim() || '';
     const errorBox = document.querySelector('#auth-error');
@@ -295,10 +306,15 @@ function authScreen() {
     try {
       let userCredential;
       if (mode === 'register') {
+        const email = identifier;
+        const username = name.toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+        if (!username) throw new Error('Choose a username using letters, numbers, dots, dashes, or underscores.');
+        if ((await getDoc(doc(db, 'usernames', username))).exists()) throw new Error('That username is already taken.');
         userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const profile = await saveUserProfile(userCredential.user.uid, name, email, 'member');
         session = { token: userCredential.user.accessToken, user: profile };
       } else {
+        const email = await resolveLoginEmail(identifier);
         userCredential = await signInWithEmailAndPassword(auth, email, password);
         const profile = await getUserProfile(userCredential.user.uid);
         session = { token: userCredential.user.accessToken, user: { ...profile, id: userCredential.user.uid } };
@@ -321,11 +337,6 @@ function accountBar() {
   const existing = document.querySelector('#account-bar');
   if (existing) existing.remove();
 
-  const existingSearch = document.querySelector('#user-search-nav');
-  if (existingSearch) existingSearch.remove();
-  header.insertAdjacentHTML('afterbegin', '<div id="user-search-nav" class="absolute left-5 top-5 z-30 w-[min(280px,calc(100vw-40px))] sm:left-8"><label class="sr-only" for="user-search-input">Find a user</label><input id="user-search-input" type="search" placeholder="Find a user to contact" class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-xs text-white outline-none backdrop-blur-xl focus:border-fuchsia-400/60"><div id="user-search-results" class="glass mt-2 hidden max-h-72 overflow-y-auto rounded-xl"></div></div>');
-  document.querySelector('#user-search-input').addEventListener('input', (event) => searchUsers(event.target.value));
-
   header.insertAdjacentHTML('beforeend', `
     <div id="account-bar" class="absolute right-5 top-5 z-30 flex items-center gap-2 sm:right-8">
       <span class="hidden text-xs text-slate-400 sm:block">${esc(session.user.name)}</span>
@@ -342,6 +353,58 @@ function accountBar() {
   });
 
   document.querySelector('#admin-button')?.addEventListener('click', adminPanel);
+}
+
+async function newMessage() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return;
+  try {
+    const snapshot = await getDocs(collection(db, 'userDirectory'));
+    const users = snapshot.docs.map((item) => item.data()).filter((user) => user.id !== currentUser.uid);
+    document.querySelector('#new-message-modal')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `<div id="new-message-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass w-full max-w-md rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Your friends list</div><h2 class="mt-1 font-display text-xl font-bold">Write a new message</h2></div><button id="close-new-message" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><input id="new-message-search" type="search" placeholder="Search friends" class="mb-3 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"><div id="new-message-users" class="max-h-72 overflow-y-auto rounded-xl border border-white/10">${renderMessageUsers(users)}</div></section></div>`);
+    const render = (queryText = '') => {
+      const normalized = queryText.trim().toLowerCase();
+      const matches = users.filter((user) => [user.name, user.email].some((value) => String(value || '').toLowerCase().includes(normalized)));
+      document.querySelector('#new-message-users').innerHTML = renderMessageUsers(matches);
+      bindMessageUsers(matches);
+    };
+    document.querySelector('#close-new-message').addEventListener('click', () => document.querySelector('#new-message-modal').remove());
+    document.querySelector('#new-message-search').addEventListener('input', (event) => render(event.target.value));
+    bindMessageUsers(users);
+  } catch (error) {
+    console.error('New message error:', error);
+    showNotice('Could not load your friends list.');
+  }
+}
+
+function renderMessageUsers(users) {
+  return users.length ? users.map((user) => `<button data-new-message-user="${esc(user.id)}" class="flex w-full items-center justify-between border-b border-white/5 px-4 py-3 text-left last:border-0 hover:bg-white/5"><span><span class="block text-xs font-bold text-white">${esc(user.name || 'User')}</span><span class="text-[10px] text-slate-500">${esc(user.email || '')}</span></span><span class="text-[10px] font-bold text-fuchsia-300">Message</span></button>`).join('') : '<div class="px-4 py-5 text-center text-xs text-slate-500">No friends found yet.</div>';
+}
+
+function bindMessageUsers(users) {
+  document.querySelectorAll('[data-new-message-user]').forEach((button) => button.addEventListener('click', () => {
+    const user = users.find((item) => item.id === button.dataset.newMessageUser);
+    if (user) { document.querySelector('#new-message-modal')?.remove(); openChat(user); }
+  }));
+}
+
+async function settingsMenu() {
+  const profile = await getUserProfile(auth.currentUser.uid);
+  document.querySelector('#settings-modal')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="settings-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><form id="settings-form" class="glass w-full max-w-md rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Account settings</div><h2 class="mt-1 font-display text-xl font-bold">Your profile</h2></div><button type="button" id="close-settings" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><label class="block text-xs font-bold text-slate-400">Display name<input id="settings-name" required value="${esc(profile.name || '')}" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="mt-4 block text-xs font-bold text-slate-400">Email<div class="mt-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-500">${esc(profile.email || auth.currentUser.email || '')}</div></label><div class="mt-6 flex flex-wrap justify-end gap-2"><button type="button" id="reset-password" class="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-slate-300">Reset password</button><button type="submit" class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2 text-xs font-extrabold text-white">Save changes</button></div></form></div>`);
+  document.querySelector('#close-settings').addEventListener('click', () => document.querySelector('#settings-modal').remove());
+  document.querySelector('#reset-password').addEventListener('click', async () => { await sendPasswordResetEmail(auth, profile.email || auth.currentUser.email); showNotice('Password reset email sent.', 'success'); });
+  document.querySelector('#settings-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = document.querySelector('#settings-name').value.trim();
+    await saveUserProfile(auth.currentUser.uid, name, profile.email || auth.currentUser.email, profile.role || 'member', profile.created_at || new Date().toISOString());
+    session.user.name = name;
+    localStorage.setItem('loopback-session', JSON.stringify(session));
+    document.querySelector('#settings-modal').remove();
+    accountBar();
+    showNotice('Profile saved to Firebase.', 'success');
+  });
 }
 
 function card(contact) {
@@ -580,6 +643,8 @@ function bootstrap() {
   document.querySelector('#close-drawer')?.addEventListener('click', () => drawer.classList.add('closed'));
   document.querySelector('#refresh')?.addEventListener('click', () => load());
   document.querySelector('#capture-message')?.addEventListener('click', captureMessage);
+  document.querySelector('#new-message')?.addEventListener('click', newMessage);
+  document.querySelector('#user-search-input')?.addEventListener('input', (event) => searchUsers(event.target.value));
   document.querySelector('#import-contacts')?.addEventListener('click', () => document.querySelector('#contact-file')?.click());
   document.querySelector('#contact-file')?.addEventListener('change', async (event) => {
     const file = event.target.files?.[0];
@@ -599,7 +664,7 @@ function bootstrap() {
     nav[1].classList.add('active');
     load('alerts');
   });
-  nav[2]?.addEventListener('click', () => showNotice('Account settings are available from your profile controls.', 'success'));
+  nav[2]?.addEventListener('click', settingsMenu);
 
   load();
 }
