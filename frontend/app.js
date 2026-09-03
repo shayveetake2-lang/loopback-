@@ -24,8 +24,10 @@ import {
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
+import * as E2EE from "./crypto.js";
 
 const app = initializeApp(firebaseConfig);
+let e2eePrivateKey = null;
 const auth = getAuth(app);
 const db = getFirestore(app);
 
@@ -171,7 +173,22 @@ async function getInbox() {
     const messages = messagesSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     const unread = messages.filter((message) => message.senderId !== currentUser.uid && !(message.readBy || []).includes(currentUser.uid));
     const otherUserId = data.participants.find((id) => id !== currentUser.uid);
-    return { id: conversation.id, ...data, otherUserId, otherName: data.participantNames?.[otherUserId] || 'LoopBack user', latest: messages[0], unreadCount: unread.length };
+    let latest = messages[0];
+    if (latest && latest.encryptedText && e2eePrivateKey) {
+      try {
+        const encryptedKey = latest.senderId === currentUser.uid ? latest.encryptedKeyForSender : latest.encryptedKeyForRecipient;
+        if (encryptedKey) {
+          const messageKey = await E2EE.decryptMessageKey(encryptedKey, e2eePrivateKey);
+          latest.text = await E2EE.decryptMessageText(latest.encryptedText, latest.iv, messageKey);
+        } else {
+          latest.text = "[Encrypted message]";
+        }
+      } catch (e) {
+        console.error("Inbox preview decryption failed", e);
+        latest.text = "[Encrypted message]";
+      }
+    }
+    return { id: conversation.id, ...data, otherUserId, otherName: data.participantNames?.[otherUserId] || 'LoopBack user', latest: latest, unreadCount: unread.length };
   }));
   return conversations.sort((first, second) => String(second.updatedAt || '').localeCompare(String(first.updatedAt || '')));
 }
@@ -215,6 +232,21 @@ function chatId(firstUserId, secondUserId) {
 async function openChat(user) {
   const currentUser = auth.currentUser;
   if (!currentUser || user.id === currentUser.uid) return;
+  
+  // E2EE: Fetch recipient's public key if not already cached
+  let recipientPublicKeyJwk = user.publicKey;
+  if (!recipientPublicKeyJwk) {
+    try {
+      const dirDoc = await getDoc(doc(db, 'userDirectory', user.id));
+      if (dirDoc.exists() && dirDoc.data().publicKey) {
+        recipientPublicKeyJwk = dirDoc.data().publicKey;
+        user.publicKey = recipientPublicKeyJwk;
+      }
+    } catch(e) {
+      console.warn("Could not fetch recipient public key", e);
+    }
+  }
+
   document.querySelector('#user-search-results')?.classList.add('hidden');
   document.querySelector('#chat-modal')?.remove();
   document.body.insertAdjacentHTML('beforeend', `<div id="chat-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass flex h-[min(680px,calc(100vh-40px))] w-full max-w-lg flex-col rounded-3xl p-5"><div class="flex items-center justify-between border-b border-white/10 pb-4"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Private conversation</div><h2 class="mt-1 font-display text-xl font-bold">${esc(user.name)}</h2></div><button id="close-chat" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div id="chat-messages" class="flex-1 space-y-3 overflow-y-auto py-5"><div class="text-center text-xs text-slate-500">Loading messages...</div></div><form id="chat-form" class="flex gap-2 border-t border-white/10 pt-4"><label class="sr-only" for="chat-input">Message</label><input id="chat-input" required maxlength="2000" placeholder="Write a message" class="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"><button class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-3 text-xs font-extrabold text-white">Send</button></form></section></div>`);
@@ -229,8 +261,27 @@ async function openChat(user) {
   }
   stopMessageListener?.();
   stopMessageListener = onSnapshot(query(messagesRef, orderBy('createdAt')), async (snapshot) => {
-    const messages = snapshot.docs.map((item) => item.data());
-    document.querySelector('#chat-messages').innerHTML = messages.length ? messages.map((message) => `<div class="flex ${message.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm ${message.senderId === currentUser.uid ? 'bg-fuchsia-500/20 text-fuchsia-50' : 'bg-white/10 text-slate-200'}"><p>${esc(message.text)}</p><div class="mt-1 text-[10px] text-slate-500">${esc(message.senderName)}</div></div></div>`).join('') : '<div class="text-center text-xs text-slate-500">No messages yet. Start the conversation.</div>';
+    const rawDocs = snapshot.docs.map((item) => item.data());
+    const messages = [];
+    for (const raw of rawDocs) {
+      let plaintext = raw.text; // fallback
+      if (raw.encryptedText && e2eePrivateKey) {
+        try {
+          const encryptedKey = raw.senderId === currentUser.uid ? raw.encryptedKeyForSender : raw.encryptedKeyForRecipient;
+          if (encryptedKey) {
+            const messageKey = await E2EE.decryptMessageKey(encryptedKey, e2eePrivateKey);
+            plaintext = await E2EE.decryptMessageText(raw.encryptedText, raw.iv, messageKey);
+          } else {
+             plaintext = "[Encrypted message - no key available]";
+          }
+        } catch (e) {
+          console.error("Failed to decrypt message", e);
+          plaintext = "[Message could not be decrypted]";
+        }
+      }
+      messages.push({ ...raw, text: plaintext });
+    }
+    document.querySelector('#chat-messages').innerHTML = messages.length ? messages.map((message) => `<div class="flex ${message.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}"><div class="max-w-[80%] rounded-2xl px-4 py-3 text-sm ${message.senderId === currentUser.uid ? 'bg-fuchsia-500/20 text-fuchsia-50' : 'bg-white/10 text-slate-200'}"><p>${esc(message.text || '')}</p><div class="mt-1 text-[10px] text-slate-500">${esc(message.senderName)}</div></div></div>`).join('') : '<div class="text-center text-xs text-slate-500">No messages yet. Start the conversation.</div>';
     const messageBox = document.querySelector('#chat-messages');
     messageBox.scrollTop = messageBox.scrollHeight;
     await Promise.all(snapshot.docs.filter((item) => item.data().senderId !== currentUser.uid && !(item.data().readBy || []).includes(currentUser.uid)).map((item) => updateDoc(item.ref, { readBy: [...(item.data().readBy || []), currentUser.uid] })));
@@ -248,8 +299,34 @@ async function openChat(user) {
     const text = input.value.trim();
     if (!text) return;
     input.disabled = true;
-    try { await addDoc(messagesRef, { text, senderId: currentUser.uid, senderName: session.user.name, createdAt: new Date().toISOString() }); await setDoc(doc(db, 'conversations', conversationId), { updatedAt: new Date().toISOString() }, { merge: true }); input.value = ''; }
-    catch (error) { showNotice(error.message || 'Could not send message.'); }
+    try {
+       let messageData = { senderId: currentUser.uid, senderName: session.user.name, createdAt: new Date().toISOString() };
+       
+       if (e2eePrivateKey && user.publicKey && session.user.publicKey) {
+         const messageKey = await E2EE.generateMessageKey();
+         const encrypted = await E2EE.encryptMessageText(text, messageKey);
+         
+         const recipientPub = await E2EE.importPublicKey(user.publicKey);
+         const senderPub = await E2EE.importPublicKey(session.user.publicKey);
+         
+         const encryptedKeyForRecipient = await E2EE.encryptMessageKey(messageKey, recipientPub);
+         const encryptedKeyForSender = await E2EE.encryptMessageKey(messageKey, senderPub);
+         
+         messageData.encryptedText = encrypted.ciphertext;
+         messageData.iv = encrypted.iv;
+         messageData.encryptedKeyForRecipient = encryptedKeyForRecipient;
+         messageData.encryptedKeyForSender = encryptedKeyForSender;
+       } else {
+         messageData.text = text; // fallback to plaintext
+       }
+       
+       await addDoc(messagesRef, messageData);
+       await setDoc(doc(db, 'conversations', conversationId), { updatedAt: new Date().toISOString() }, { merge: true });
+       input.value = '';
+    } catch (error) { 
+       console.error("Message send error", error);
+       showNotice(error.message || 'Could not send message.'); 
+    }
     input.disabled = false;
     input.focus();
   });
@@ -322,13 +399,49 @@ function authScreen() {
         if (!username) throw new Error('Choose a username using letters, numbers, dots, dashes, or underscores.');
         if ((await getDoc(doc(db, 'usernames', username))).exists()) throw new Error('That username is already taken.');
         userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const profile = await saveUserProfile(userCredential.user.uid, name, email, 'member');
-        session = { token: userCredential.user.accessToken, user: profile };
+        
+        const uid = userCredential.user.uid;
+        const passwordKey = await E2EE.deriveKeyFromPassword(password, uid);
+        const rsaKeys = await E2EE.generateRSAKeyPair();
+        e2eePrivateKey = rsaKeys.privateKey;
+        const jwkPublic = await E2EE.exportPublicKey(rsaKeys.publicKey);
+        const jwkPrivate = await E2EE.exportPrivateKey(rsaKeys.privateKey);
+        const encryptedPrivateKey = await E2EE.encryptPrivateKey(jwkPrivate, passwordKey);
+        
+        const profile = await saveUserProfile(uid, name, email, 'member');
+        await setDoc(doc(db, 'users', uid), { publicKey: jwkPublic, encryptedPrivateKey }, { merge: true });
+        await setDoc(doc(db, 'userDirectory', uid), { publicKey: jwkPublic }, { merge: true });
+        
+        session = { token: userCredential.user.accessToken, user: { ...profile, publicKey: jwkPublic, encryptedPrivateKey } };
       } else {
         const email = await resolveLoginEmail(identifier);
         userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const profile = await getUserProfile(userCredential.user.uid);
-        session = { token: userCredential.user.accessToken, user: { ...profile, id: userCredential.user.uid } };
+        
+        const uid = userCredential.user.uid;
+        const passwordKey = await E2EE.deriveKeyFromPassword(password, uid);
+        const profile = await getUserProfile(uid);
+        
+        if (profile.encryptedPrivateKey) {
+          try {
+            const jwkPrivate = await E2EE.decryptPrivateKey(profile.encryptedPrivateKey.encryptedKey, profile.encryptedPrivateKey.iv, passwordKey);
+            e2eePrivateKey = await E2EE.importPrivateKey(jwkPrivate);
+          } catch (e) {
+            console.error("Failed to decrypt E2EE private key", e);
+            throw new Error("Unable to decrypt messages. Did you reset your password?");
+          }
+        } else {
+          const rsaKeys = await E2EE.generateRSAKeyPair();
+          e2eePrivateKey = rsaKeys.privateKey;
+          const jwkPublic = await E2EE.exportPublicKey(rsaKeys.publicKey);
+          const jwkPrivate = await E2EE.exportPrivateKey(rsaKeys.privateKey);
+          const encryptedPrivateKey = await E2EE.encryptPrivateKey(jwkPrivate, passwordKey);
+          await setDoc(doc(db, 'users', uid), { publicKey: jwkPublic, encryptedPrivateKey }, { merge: true });
+          await setDoc(doc(db, 'userDirectory', uid), { publicKey: jwkPublic }, { merge: true });
+          profile.publicKey = jwkPublic;
+          profile.encryptedPrivateKey = encryptedPrivateKey;
+        }
+        
+        session = { token: userCredential.user.accessToken, user: { ...profile, id: uid } };
       }
 
       localStorage.setItem('loopback-session', JSON.stringify(session));

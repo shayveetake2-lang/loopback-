@@ -69,7 +69,8 @@ service cloud.firestore {
         allow update: if signedIn()
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
           && request.resource.data.senderId == resource.data.senderId
-          && request.resource.data.text == resource.data.text;
+          && request.resource.data.get('text', '') == resource.data.get('text', '')
+          && request.resource.data.get('encryptedText', '') == resource.data.get('encryptedText', '');
       }
     }
   }
