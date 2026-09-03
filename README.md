@@ -23,4 +23,10 @@ The static dashboard is Pages-ready:
 npx wrangler pages deploy frontend --project-name loopback
 ```
 
-For production, deploy the FastAPI service to a Python-capable host and set `window.LOOPBACK_API_URL` before `app.js` loads, or proxy `/api/*` from the Pages project to that service. Cloudflare Pages serves the frontend; FastAPI remains the JSON-backed API service.
+The included Pages Function at `functions/api/[[path]].js` proxies `/api/*` to the FastAPI service. Deploy the API to a Python-capable host, then configure its public URL once:
+
+```bash
+npx wrangler pages secret put API_ORIGIN --project-name loopback
+```
+
+Paste the API origin when Wrangler prompts. Then redeploy Pages. Cloudflare Pages serves the frontend and proxy; FastAPI remains the JSON-backed API service.
