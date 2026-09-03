@@ -19,6 +19,7 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  deleteDoc,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -334,18 +335,28 @@ async function settingsMenu() {
   document.querySelector('#reset-password').addEventListener('click', async () => { await sendPasswordResetEmail(auth, profile.email || auth.currentUser.email); showNotice('Password reset email sent.', 'success'); });
   document.querySelector('#settings-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const saveButton = document.querySelector('#settings-form button[type="submit"]');
+    saveButton.disabled = true;
+    saveButton.textContent = 'Saving...';
     const name = document.querySelector('#settings-name').value.trim();
     preferences.theme = document.querySelector('#settings-theme').checked ? 'light' : 'dark';
     preferences.density = document.querySelector('#settings-density').checked ? 'compact' : 'comfortable';
     localStorage.setItem('loopback-preferences', JSON.stringify(preferences));
     applyPreferences();
-    await updateDoc(doc(db, 'users', auth.currentUser.uid), { preferences });
-    await saveUserProfile(auth.currentUser.uid, name, profile.email || auth.currentUser.email, profile.role || 'member', profile.created_at || new Date().toISOString());
-    session.user.name = name;
-    localStorage.setItem('loopback-session', JSON.stringify(session));
-    document.querySelector('#settings-modal').remove();
-    accountBar();
-    showNotice('Profile saved to Firebase.', 'success');
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), { preferences });
+      await saveUserProfile(auth.currentUser.uid, name, profile.email || auth.currentUser.email, profile.role || 'member', profile.created_at || new Date().toISOString());
+      session.user.name = name;
+      localStorage.setItem('loopback-session', JSON.stringify(session));
+      document.querySelector('#settings-modal').remove();
+      accountBar();
+      showNotice('Profile saved to Firebase.', 'success');
+    } catch (error) {
+      console.error('Settings save error:', error);
+      saveButton.disabled = false;
+      saveButton.textContent = 'Save changes';
+      showNotice('Could not save your settings. Try again.');
+    }
   });
 }
 
@@ -372,7 +383,7 @@ function card(contact) {
       </div>
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs text-slate-500">Last contact <strong class="font-semibold text-slate-300">${contact.last_interaction_date}</strong><span class="mx-1 text-slate-700">·</span>${contact.days_since_contact} days ago</div>
-        <button data-contact="${esc(contact.id)}" class="loop-in rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2.5 text-xs font-extrabold text-white shadow-lg shadow-fuchsia-900/20 transition hover:brightness-110">Loop In <span class="ml-1">↗</span></button>
+        <div class="flex shrink-0 gap-2"><button data-delete-contact="${esc(contact.id)}" class="rounded-xl border border-white/10 px-3 py-2.5 text-xs font-bold text-slate-400 hover:border-rose-400/40 hover:text-rose-200" aria-label="Remove ${esc(contact.name)}">Remove</button><button data-contact="${esc(contact.id)}" class="loop-in rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2.5 text-xs font-extrabold text-white shadow-lg shadow-fuchsia-900/20 transition hover:brightness-110">Loop In <span class="ml-1">↗</span></button></div>
       </div>
     </article>
   `;
@@ -404,6 +415,7 @@ async function load(filter = 'all') {
     const synced = document.querySelector('#last-synced');
     if (synced) synced.textContent = `Synced ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
     document.querySelectorAll('.loop-in').forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.contact)));
+    document.querySelectorAll('[data-delete-contact]').forEach((button) => button.addEventListener('click', () => deleteContact(button.dataset.deleteContact)));
   } catch (error) {
     console.error(error);
     if (requestId !== loadRequestId) return;
@@ -411,6 +423,36 @@ async function load(filter = 'all') {
     grid.innerHTML = `<div class="glass rounded-2xl border border-rose-400/20 p-6 text-sm text-rose-200"><p>${message}</p><button id="retry-contacts" class="mt-3 rounded-lg border border-rose-300/30 px-3 py-2 text-xs font-bold hover:bg-white/10">Try again</button></div>`;
     document.querySelector('#retry-contacts')?.addEventListener('click', () => load(filter));
   }
+}
+
+async function deleteContact(id) {
+  const contact = contacts.find((item) => item.id === id);
+  if (!contact || !confirm(`Remove ${contact.name} from your contacts?`)) return;
+  try {
+    await deleteDoc(doc(db, 'contacts', id));
+    showNotice('Contact removed from Firebase.', 'success');
+    load();
+  } catch (error) {
+    console.error('Contact delete error:', error);
+    showNotice('Could not remove this contact.');
+  }
+}
+
+function addContact() {
+  document.querySelector('#contact-modal')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="contact-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><form id="contact-form" class="glass max-h-[calc(100vh-40px)] w-full max-w-lg overflow-y-auto rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Your contacts</div><h2 class="mt-1 font-display text-xl font-bold">Add a contact</h2></div><button type="button" id="close-contact" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div class="grid gap-4 sm:grid-cols-2"><label class="text-xs font-bold text-slate-400 sm:col-span-2">Name<input id="contact-name" required class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="text-xs font-bold text-slate-400">Last contact<input id="contact-date" type="date" value="${new Date().toISOString().slice(0, 10)}" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="text-xs font-bold text-slate-400">Relationship tier<select id="contact-tier" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white"><option>Inner Loop</option><option selected>Mid Loop</option><option>Outer Loop</option></select></label><label class="text-xs font-bold text-slate-400 sm:col-span-2">What did you discuss?<input id="contact-topic" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="text-xs font-bold text-slate-400">Role<input id="contact-role" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="text-xs font-bold text-slate-400">Company<input id="contact-company" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label></div><div class="mt-6 flex justify-end gap-2"><button type="button" id="close-contact-secondary" class="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-slate-300">Cancel</button><button type="submit" class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2 text-xs font-extrabold text-white">Add contact</button></div></form></div>`);
+  const close = () => document.querySelector('#contact-modal')?.remove();
+  document.querySelector('#close-contact').addEventListener('click', close);
+  document.querySelector('#close-contact-secondary').addEventListener('click', close);
+  document.querySelector('#contact-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = document.querySelector('#contact-name').value.trim();
+    const tier = document.querySelector('#contact-tier').value;
+    const date = document.querySelector('#contact-date').value || new Date().toISOString().slice(0, 10);
+    const contact = { id: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`, name, avatar_url: '', last_interaction_date: date, last_topic: document.querySelector('#contact-topic').value.trim() || 'New contact', relationship_tier: tier, custom_cadence_days: tierDefaults[tier].cadence_days, role: document.querySelector('#contact-role').value.trim(), company: document.querySelector('#contact-company').value.trim(), location: '', interactions: [], deals: [] };
+    try { await setDoc(doc(db, 'contacts', contact.id), contact); close(); showNotice('Contact added to Firebase.', 'success'); load(); }
+    catch (error) { console.error('Contact add error:', error); showNotice('Could not add this contact.'); }
+  });
 }
 
 function requestFilter(filter) {
@@ -605,13 +647,20 @@ function helpMenu() {
 
 function helpPage() {
   document.querySelector('#help-page')?.remove();
-  document.body.insertAdjacentHTML('beforeend', `<main id="help-page" class="fixed inset-0 z-40 overflow-y-auto bg-[#090712] p-5 text-white sm:p-10"><div class="mx-auto max-w-4xl"><button id="close-help-page" class="glass mb-8 rounded-xl px-4 py-2 text-xs font-bold text-slate-300">← Back to dashboard</button><div class="mb-10"><div class="text-[10px] font-bold uppercase tracking-[.2em] text-fuchsia-300">LoopBack guide</div><h1 class="mt-2 font-display text-4xl font-bold">How to use LoopBack</h1><p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Use this guide to set up your account, add contacts, stay on top of follow-ups, and message other LoopBack users.</p></div><div class="grid gap-4 sm:grid-cols-2"><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Create an account</h2><p class="mt-2 text-sm leading-6 text-slate-400">Choose a unique username, email, and password. You can sign in with either your username or email later.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Add contacts</h2><p class="mt-2 text-sm leading-6 text-slate-400">Select Import CSV. Your file must include a name column. Add the optional date, topic, relationship tier, cadence, role, company, location, and avatar URL columns when available.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Read your dashboard</h2><p class="mt-2 text-sm leading-6 text-slate-400">All Contacts shows your imported list. Drift Alerts shows contacts whose follow-up cadence has passed. Loop In opens their context and suggested icebreaker.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Message people</h2><p class="mt-2 text-sm leading-6 text-slate-400">Search for a registered user in the sidebar or select Write a new message. Choose a person to open a private conversation backed by Firebase.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Capture interactions</h2><p class="mt-2 text-sm leading-6 text-slate-400">Capture message records an important note from Messenger, Snapchat, phone, or another source and updates the contact's last interaction.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Manage preferences</h2><p class="mt-2 text-sm leading-6 text-slate-400">Settings lets you update your display name, choose light or dark mode, use compact cards, and send a password reset email.</p></article></div><section class="glass mt-4 rounded-2xl p-5"><h2 class="font-display text-lg font-bold">CSV format</h2><p class="mt-2 text-sm leading-6 text-slate-400">Required: name. Optional: avatar_url, last_interaction_date, last_topic, relationship_tier, custom_cadence_days, role, company, location.</p><pre class="mt-4 overflow-x-auto rounded-xl bg-black/20 p-4 text-xs text-fuchsia-200">name,last_interaction_date,last_topic,relationship_tier,custom_cadence_days,role,company,location</pre></section></div></main>`);
+  const helpTheme = preferences.theme === 'light' ? 'bg-[#f7f9fc] text-[#1f2430]' : 'bg-[#090712] text-white';
+  document.body.insertAdjacentHTML('beforeend', `<main id="help-page" class="fixed inset-0 z-40 overflow-y-auto ${helpTheme} p-5 sm:p-10"><div class="mx-auto max-w-4xl"><button id="close-help-page" class="glass mb-8 rounded-xl px-4 py-2 text-xs font-bold text-slate-300">← Back to dashboard</button><div class="mb-10"><div class="text-[10px] font-bold uppercase tracking-[.2em] text-fuchsia-300">LoopBack guide</div><h1 class="mt-2 font-display text-4xl font-bold">How to use LoopBack</h1><p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Use this guide to set up your account, add contacts, stay on top of follow-ups, and message other LoopBack users.</p></div><div class="grid gap-4 sm:grid-cols-2"><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Create an account</h2><p class="mt-2 text-sm leading-6 text-slate-400">Choose a unique username, email, and password. You can sign in with either your username or email later.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Add contacts</h2><p class="mt-2 text-sm leading-6 text-slate-400">Select Import CSV. Your file must include a name column. Add the optional date, topic, relationship tier, cadence, role, company, location, and avatar URL columns when available.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Read your dashboard</h2><p class="mt-2 text-sm leading-6 text-slate-400">All Contacts shows your imported list. Drift Alerts shows contacts whose follow-up cadence has passed. Loop In opens their context and suggested icebreaker.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Message people</h2><p class="mt-2 text-sm leading-6 text-slate-400">Search for a registered user in the sidebar or select Write a new message. Choose a person to open a private conversation backed by Firebase.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Capture interactions</h2><p class="mt-2 text-sm leading-6 text-slate-400">Capture message records an important note from Messenger, Snapchat, phone, or another source and updates the contact's last interaction.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Manage preferences</h2><p class="mt-2 text-sm leading-6 text-slate-400">Settings lets you update your display name, choose light or dark mode, use compact cards, and send a password reset email.</p></article></div><section class="glass mt-4 rounded-2xl p-5"><h2 class="font-display text-lg font-bold">CSV format</h2><p class="mt-2 text-sm leading-6 text-slate-400">Required: name. Optional: avatar_url, last_interaction_date, last_topic, relationship_tier, custom_cadence_days, role, company, location.</p><pre class="mt-4 overflow-x-auto rounded-xl bg-black/20 p-4 text-xs text-fuchsia-200">name,last_interaction_date,last_topic,relationship_tier,custom_cadence_days,role,company,location</pre></section></div></main>`);
   document.querySelector('#close-help-page').addEventListener('click', () => document.querySelector('#help-page').remove());
 }
 
 function bootstrap() {
   applyPreferences();
+  ['contact-count', 'alert-count', 'total-stat', 'follow-stat'].forEach((id) => {
+    const element = document.querySelector(`#${id}`);
+    if (element) element.textContent = 'Loading';
+  });
   accountBar();
+  const header = document.querySelector('header');
+  if (header && !document.querySelector('#add-contact')) header.insertAdjacentHTML('beforeend', '<button id="add-contact" class="glass rounded-xl px-3 py-2 text-xs font-bold text-slate-300 hover:border-fuchsia-400/50">Add contact</button>');
   const sidebar = document.querySelector('aside');
   const existingMenuToggle = document.querySelector('#mobile-menu-toggle');
   if (!existingMenuToggle) {
@@ -635,6 +684,7 @@ function bootstrap() {
   });
   document.querySelector('#refresh')?.addEventListener('click', () => load());
   document.querySelector('#capture-message')?.addEventListener('click', captureMessage);
+  document.querySelector('#add-contact')?.addEventListener('click', addContact);
   document.querySelector('#new-message')?.addEventListener('click', newMessage);
   document.querySelector('#user-search-input')?.addEventListener('input', (event) => searchUsers(event.target.value));
   document.querySelector('#import-contacts')?.addEventListener('click', () => document.querySelector('#contact-file')?.click());
