@@ -5,30 +5,25 @@ Local-first relationship tracking with weighted orbit tiers and context-aware ic
 ## Run locally
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn backend.main:app --reload
+npm install
+npx serve frontend
 ```
 
-Open `frontend/index.html` while the API is running at `http://127.0.0.1:8000`.
+The frontend app uses Firebase Authentication and Firestore directly in the browser.
 
-The JSON data store lives at `data/contacts.json`. API routes include `GET /api/contacts/drift` and `POST /api/icebreaker/generate`.
+## Firebase setup
 
-## Cloudflare deployment
+1. Create a Firebase project.
+2. Enable Authentication and Email/Password sign-in.
+3. Create a Firestore database.
+4. Publish the Firestore rules from this repository with `firebase deploy --only firestore:rules`.
 
-The static dashboard is Pages-ready:
+## Deploy to Firebase Hosting
 
 ```bash
-npx wrangler pages deploy frontend --project-name loopback
+npm install -g firebase-tools
+firebase login
+firebase deploy --only hosting,firestore:rules
 ```
 
-The included Pages Function at `functions/api/[[path]].js` proxies `/api/*` to the FastAPI service. Deploy the API to a Python-capable host, then configure its public URL once:
-
-The repository includes a `Dockerfile` and `render.yaml` for a straightforward Render deployment. In Render, choose **New > Blueprint**, select this GitHub repository, and deploy the `loopback-api` service. Copy its generated `https://...onrender.com` URL as the API origin.
-
-```bash
-npx wrangler pages secret put API_ORIGIN --project-name loopback
-```
-
-Paste the API origin when Wrangler prompts. Then redeploy Pages. Cloudflare Pages serves the frontend and proxy; FastAPI remains the JSON-backed API service.
+This project is configured to deploy the static app from `frontend` using Firebase Hosting.

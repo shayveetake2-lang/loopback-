@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "node --check frontend/app.js",
-    "serve": "npx serve frontend"
+    "serve": "npx serve frontend",
+    "deploy": "firebase deploy --only hosting,firestore:rules"
   }
 }
