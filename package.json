@@ -1,0 +1,9 @@
+{
+  "name": "loopback-firebase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check frontend/app.js",
+    "serve": "npx serve frontend"
+  }
+}
