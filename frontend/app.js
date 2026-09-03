@@ -171,7 +171,24 @@ async function getUserProfile(uid) {
 async function saveUserProfile(uid, name, email, role = 'member') {
   const profile = { id: uid, name, email, role, created_at: new Date().toISOString() };
   await setDoc(doc(db, 'users', uid), profile, { merge: true });
+  await setDoc(doc(db, 'userDirectory', uid), { id: uid, name, email }, { merge: true });
   return profile;
+}
+
+async function syncUserDirectory(profile, uid) {
+  await setDoc(doc(db, 'userDirectory', uid), { id: uid, name: profile.name || 'User', email: profile.email || '' }, { merge: true });
+}
+
+async function searchUsers(query) {
+  const normalizedQuery = query.trim().toLowerCase();
+  const results = document.querySelector('#user-search-results');
+  if (!results || !normalizedQuery) { results?.classList.add('hidden'); return; }
+  try {
+    const snapshot = await getDocs(collection(db, 'userDirectory'));
+    const users = snapshot.docs.map((item) => item.data()).filter((user) => user.id !== auth.currentUser?.uid && [user.name, user.email].some((value) => String(value || '').toLowerCase().includes(normalizedQuery)));
+    results.innerHTML = users.length ? users.slice(0, 8).map((user) => `<a href="mailto:${esc(user.email)}" class="block border-b border-white/5 px-4 py-3 last:border-0 hover:bg-white/5"><div class="text-xs font-bold text-white">${esc(user.name)}</div><div class="text-[10px] text-slate-500">${esc(user.email)}</div><div class="mt-1 text-[10px] font-bold text-fuchsia-300">Send email</div></a>`).join('') : '<div class="px-4 py-3 text-xs text-slate-500">No matching users.</div>';
+    results.classList.remove('hidden');
+  } catch (error) { console.error('User search error:', error); }
 }
 
 function authScreen() {
@@ -260,6 +277,11 @@ function accountBar() {
   if (!header) return;
   const existing = document.querySelector('#account-bar');
   if (existing) existing.remove();
+
+  const existingSearch = document.querySelector('#user-search-nav');
+  if (existingSearch) existingSearch.remove();
+  header.insertAdjacentHTML('afterbegin', '<div id="user-search-nav" class="absolute left-5 top-5 z-30 w-[min(280px,calc(100vw-40px))] sm:left-8"><label class="sr-only" for="user-search-input">Find a user</label><input id="user-search-input" type="search" placeholder="Find a user to contact" class="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-xs text-white outline-none backdrop-blur-xl focus:border-fuchsia-400/60"><div id="user-search-results" class="glass mt-2 hidden max-h-72 overflow-y-auto rounded-xl"></div></div>');
+  document.querySelector('#user-search-input').addEventListener('input', (event) => searchUsers(event.target.value));
 
   header.insertAdjacentHTML('beforeend', `
     <div id="account-bar" class="absolute right-5 top-5 z-30 flex items-center gap-2 sm:right-8">
@@ -542,6 +564,7 @@ function bootstrap() {
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     const profile = await getUserProfile(user.uid);
+    await syncUserDirectory(profile, user.uid);
     session = {
       token: user.accessToken,
       user: { ...profile, id: user.uid },

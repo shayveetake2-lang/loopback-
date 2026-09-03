@@ -27,5 +27,11 @@ service cloud.firestore {
           && request.resource.data.role == resource.data.role);
       allow delete: if isAdmin();
     }
+
+    match /userDirectory/{userId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == userId;
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
   }
 }
