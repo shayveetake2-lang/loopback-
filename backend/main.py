@@ -26,6 +26,7 @@ class Contact(BaseModel):
     name: str
     avatar_url: str
     last_interaction_date: str
+    last_topic: str = ""
     relationship_tier: TierName
     custom_cadence_days: int = Field(gt=0)
     role: str = ""
@@ -78,11 +79,15 @@ def drift_contacts() -> list[dict]:
 
 
 @app.post("/api/icebreaker/generate")
-def generate_icebreaker(payload: IcebreakerRequest) -> dict[str, str]:
+def generate_icebreaker(payload: IcebreakerRequest) -> dict[str, object]:
     contact = find_contact(payload.contact_id)
-    latest = contact.interactions[0] if contact.interactions else None
-    if latest:
-        draft = f"Hey {contact.name.split()[0]} — I was just thinking about our conversation: {latest.note} How has that been unfolding?"
-    else:
-        draft = f"Hey {contact.name.split()[0]} — it has been a while. What has been energizing you lately?"
-    return {"contact_id": contact.id, "draft": draft}
+    system_prompt = f"""You are LoopBack's thoughtful relationship assistant. Write two short, warm, non-robotic message options for this contact.
+Contact name: {contact.name}
+Relationship tier: {contact.relationship_tier}
+Last topic: {contact.last_topic}
+Rules: reference the last topic naturally, avoid generic networking language, ask one easy-to-answer question, and never mention that you are an AI. Use Casual/Warm for Inner Loop; use Professional/Direct for Mid Loop and Outer Loop.
+Return only the two message options labeled Casual/Warm and Professional/Direct."""
+    first_name = contact.name.split()[0]
+    casual = f"Hey {first_name} — I was thinking about {contact.last_topic.lower()}. How has that been unfolding?"
+    professional = f"Hi {first_name}, following up on {contact.last_topic.lower()}. How is that progressing on your end?"
+    return {"contact_id": contact.id, "prompt": system_prompt, "options": {"casual_warm": casual, "professional_direct": professional}, "draft": casual if contact.relationship_tier == "Inner Loop" else professional}
