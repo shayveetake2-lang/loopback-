@@ -372,6 +372,18 @@ async function openDrawer(id) {
 
 async function adminPanel() {
   try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      showNotice('Please sign in to access the admin panel.');
+      return;
+    }
+
+    const currentProfile = await getUserProfile(currentUser.uid);
+    if (currentProfile.role !== 'admin') {
+      showNotice('Admin access is required.');
+      return;
+    }
+
     const usersSnapshot = await getDocs(collection(db, 'users'));
     const users = usersSnapshot.docs.map((docSnap) => docSnap.data());
 
