@@ -25,6 +25,8 @@ npx wrangler pages deploy frontend --project-name loopback
 
 The included Pages Function at `functions/api/[[path]].js` proxies `/api/*` to the FastAPI service. Deploy the API to a Python-capable host, then configure its public URL once:
 
+The repository includes a `Dockerfile` and `render.yaml` for a straightforward Render deployment. In Render, choose **New > Blueprint**, select this GitHub repository, and deploy the `loopback-api` service. Copy its generated `https://...onrender.com` URL as the API origin.
+
 ```bash
 npx wrangler pages secret put API_ORIGIN --project-name loopback
 ```
