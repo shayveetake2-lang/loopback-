@@ -324,6 +324,7 @@ async function load(filter = 'all') {
     document.querySelector('#alert-count').textContent = urgent.length;
     document.querySelector('#total-stat').textContent = contacts.length;
     document.querySelector('#follow-stat').textContent = urgent.length;
+    document.querySelector('#contact-summary').textContent = `${contacts.length} contacts`;
     document.querySelectorAll('.loop-in').forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.contact)));
   } catch (error) {
     console.error(error);
