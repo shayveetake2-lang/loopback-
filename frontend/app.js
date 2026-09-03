@@ -3,6 +3,7 @@ import {
   getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -398,11 +399,11 @@ async function adminPanel() {
             <button id="close-admin" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button>
           </div>
           <div class="overflow-hidden rounded-xl border border-white/10">
-            <div class="grid grid-cols-[1fr_1fr_110px] gap-3 border-b border-white/10 bg-white/[.04] px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-              <span>Account</span><span>Created</span><span>Role</span>
+            <div class="grid grid-cols-[1fr_1fr_110px_90px] gap-3 border-b border-white/10 bg-white/[.04] px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              <span>Account</span><span>Created</span><span>Role</span><span>Recovery</span>
             </div>
             ${users.map((user) => `
-              <div class="grid grid-cols-[1fr_1fr_110px] items-center gap-3 border-b border-white/5 px-4 py-3 text-xs last:border-0">
+              <div class="grid grid-cols-[1fr_1fr_110px_90px] items-center gap-3 border-b border-white/5 px-4 py-3 text-xs last:border-0">
                 <div>
                   <div class="font-semibold text-slate-200">${esc(user.name)}</div>
                   <div class="text-[10px] text-slate-500">${esc(user.email)}</div>
@@ -412,6 +413,7 @@ async function adminPanel() {
                   <option ${user.role === 'member' ? 'selected' : ''} value="member">Member</option>
                   <option ${user.role === 'admin' ? 'selected' : ''} value="admin">Admin</option>
                 </select>
+                <button data-reset-user="${esc(user.email)}" class="rounded-lg border border-white/10 px-2 py-2 text-[10px] font-bold text-slate-400 hover:text-white">Reset password</button>
               </div>`).join('')}
           </div>
         </div>
@@ -424,6 +426,16 @@ async function adminPanel() {
         const userId = select.dataset.roleUser;
         await updateDoc(doc(db, 'users', userId), { role: select.value });
         showNotice('User role updated.', 'success');
+      });
+    });
+    document.querySelectorAll('[data-reset-user]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        try {
+          await sendPasswordResetEmail(auth, button.dataset.resetUser);
+          showNotice('Password reset email sent.', 'success');
+        } catch (error) {
+          showNotice(error.message || 'Could not send password reset email.');
+        }
       });
     });
   } catch (error) {
