@@ -41,6 +41,13 @@ let session = JSON.parse(localStorage.getItem('loopback-session') || 'null');
 let stopMessageListener = null;
 let loadRequestId = 0;
 let filterTimer = null;
+const preferences = JSON.parse(localStorage.getItem('loopback-preferences') || '{}');
+const legacyDemoContactIds = new Set(['maya-chen', 'jon-bell', 'alina-ross', 'samir-patel']);
+
+function applyPreferences() {
+  document.body.classList.toggle('light-mode', preferences.theme === 'light');
+  document.body.classList.toggle('compact-mode', preferences.density === 'compact');
+}
 
 const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -320,13 +327,19 @@ function bindMessageUsers(users) {
 
 async function settingsMenu() {
   const profile = await getUserProfile(auth.currentUser.uid);
+  Object.assign(preferences, profile.preferences || {});
   document.querySelector('#settings-modal')?.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div id="settings-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><form id="settings-form" class="glass w-full max-w-md rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Account settings</div><h2 class="mt-1 font-display text-xl font-bold">Your profile</h2></div><button type="button" id="close-settings" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><label class="block text-xs font-bold text-slate-400">Display name<input id="settings-name" required value="${esc(profile.name || '')}" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="mt-4 block text-xs font-bold text-slate-400">Email<div class="mt-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-500">${esc(profile.email || auth.currentUser.email || '')}</div></label><div class="mt-6 flex flex-wrap justify-end gap-2"><button type="button" id="reset-password" class="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-slate-300">Reset password</button><button type="submit" class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2 text-xs font-extrabold text-white">Save changes</button></div></form></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div id="settings-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><form id="settings-form" class="glass w-full max-w-md rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Account settings</div><h2 class="mt-1 font-display text-xl font-bold">Your profile</h2></div><button type="button" id="close-settings" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><label class="block text-xs font-bold text-slate-400">Display name<input id="settings-name" required value="${esc(profile.name || '')}" class="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-fuchsia-400/60"></label><label class="mt-4 block text-xs font-bold text-slate-400">Email<div class="mt-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-500">${esc(profile.email || auth.currentUser.email || '')}</div></label><fieldset class="mt-5 border-t border-white/10 pt-4"><legend class="text-xs font-bold text-slate-400">Appearance</legend><label class="mt-3 flex items-center justify-between text-xs text-slate-300">Light mode<input id="settings-theme" type="checkbox" ${preferences.theme === 'light' ? 'checked' : ''} class="h-4 w-4 accent-fuchsia-500"></label><label class="mt-3 flex items-center justify-between text-xs text-slate-300">Compact contact cards<input id="settings-density" type="checkbox" ${preferences.density === 'compact' ? 'checked' : ''} class="h-4 w-4 accent-fuchsia-500"></label></fieldset><div class="mt-6 flex flex-wrap justify-end gap-2"><button type="button" id="reset-password" class="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-slate-300">Reset password</button><button type="submit" class="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2 text-xs font-extrabold text-white">Save changes</button></div></form></div>`);
   document.querySelector('#close-settings').addEventListener('click', () => document.querySelector('#settings-modal').remove());
   document.querySelector('#reset-password').addEventListener('click', async () => { await sendPasswordResetEmail(auth, profile.email || auth.currentUser.email); showNotice('Password reset email sent.', 'success'); });
   document.querySelector('#settings-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const name = document.querySelector('#settings-name').value.trim();
+    preferences.theme = document.querySelector('#settings-theme').checked ? 'light' : 'dark';
+    preferences.density = document.querySelector('#settings-density').checked ? 'compact' : 'comfortable';
+    localStorage.setItem('loopback-preferences', JSON.stringify(preferences));
+    applyPreferences();
+    await updateDoc(doc(db, 'users', auth.currentUser.uid), { preferences });
     await saveUserProfile(auth.currentUser.uid, name, profile.email || auth.currentUser.email, profile.role || 'member', profile.created_at || new Date().toISOString());
     session.user.name = name;
     localStorage.setItem('loopback-session', JSON.stringify(session));
@@ -375,7 +388,7 @@ async function load(filter = 'all') {
       timeout,
     ]);
     if (requestId !== loadRequestId) return;
-    contacts = snapshot.docs.map((docSnap) => docSnap.data()).map(driftFor);
+    contacts = snapshot.docs.map((docSnap) => docSnap.data()).filter((contact) => !legacyDemoContactIds.has(contact.id)).map(driftFor);
     const visible = filter === 'alerts' ? contacts.filter((item) => item.is_overdue) : contacts;
     const urgent = contacts.filter((item) => item.is_overdue);
 
@@ -590,7 +603,14 @@ function helpMenu() {
   document.querySelector('#close-help').addEventListener('click', () => document.querySelector('#help-modal').remove());
 }
 
+function helpPage() {
+  document.querySelector('#help-page')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<main id="help-page" class="fixed inset-0 z-40 overflow-y-auto bg-[#090712] p-5 text-white sm:p-10"><div class="mx-auto max-w-4xl"><button id="close-help-page" class="glass mb-8 rounded-xl px-4 py-2 text-xs font-bold text-slate-300">← Back to dashboard</button><div class="mb-10"><div class="text-[10px] font-bold uppercase tracking-[.2em] text-fuchsia-300">LoopBack guide</div><h1 class="mt-2 font-display text-4xl font-bold">How to use LoopBack</h1><p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Use this guide to set up your account, add contacts, stay on top of follow-ups, and message other LoopBack users.</p></div><div class="grid gap-4 sm:grid-cols-2"><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Create an account</h2><p class="mt-2 text-sm leading-6 text-slate-400">Choose a unique username, email, and password. You can sign in with either your username or email later.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Add contacts</h2><p class="mt-2 text-sm leading-6 text-slate-400">Select Import CSV. Your file must include a name column. Add the optional date, topic, relationship tier, cadence, role, company, location, and avatar URL columns when available.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Read your dashboard</h2><p class="mt-2 text-sm leading-6 text-slate-400">All Contacts shows your imported list. Drift Alerts shows contacts whose follow-up cadence has passed. Loop In opens their context and suggested icebreaker.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Message people</h2><p class="mt-2 text-sm leading-6 text-slate-400">Search for a registered user in the sidebar or select Write a new message. Choose a person to open a private conversation backed by Firebase.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Capture interactions</h2><p class="mt-2 text-sm leading-6 text-slate-400">Capture message records an important note from Messenger, Snapchat, phone, or another source and updates the contact's last interaction.</p></article><article class="glass rounded-2xl p-5"><h2 class="font-display text-lg font-bold">Manage preferences</h2><p class="mt-2 text-sm leading-6 text-slate-400">Settings lets you update your display name, choose light or dark mode, use compact cards, and send a password reset email.</p></article></div><section class="glass mt-4 rounded-2xl p-5"><h2 class="font-display text-lg font-bold">CSV format</h2><p class="mt-2 text-sm leading-6 text-slate-400">Required: name. Optional: avatar_url, last_interaction_date, last_topic, relationship_tier, custom_cadence_days, role, company, location.</p><pre class="mt-4 overflow-x-auto rounded-xl bg-black/20 p-4 text-xs text-fuchsia-200">name,last_interaction_date,last_topic,relationship_tier,custom_cadence_days,role,company,location</pre></section></div></main>`);
+  document.querySelector('#close-help-page').addEventListener('click', () => document.querySelector('#help-page').remove());
+}
+
 function bootstrap() {
+  applyPreferences();
   accountBar();
   const sidebar = document.querySelector('aside');
   const existingMenuToggle = document.querySelector('#mobile-menu-toggle');
@@ -639,7 +659,7 @@ function bootstrap() {
     requestFilter('alerts');
   });
   nav[2]?.addEventListener('click', () => { closeMobileMenu(); settingsMenu(); });
-  nav[3]?.addEventListener('click', () => { closeMobileMenu(); helpMenu(); });
+  nav[3]?.addEventListener('click', () => { closeMobileMenu(); helpPage(); });
 
   load();
 }
@@ -647,6 +667,8 @@ function bootstrap() {
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     const profile = await getUserProfile(user.uid);
+    Object.assign(preferences, profile.preferences || {});
+    localStorage.setItem('loopback-preferences', JSON.stringify(preferences));
     await syncUserDirectory(profile, user.uid);
     session = {
       token: user.accessToken,
