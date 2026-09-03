@@ -168,12 +168,19 @@ async function refreshUnreadCount() {
   }
 }
 
+function setUnreadBadge(conversations) {
+  const unreadCount = conversations.reduce((total, conversation) => total + conversation.unreadCount, 0);
+  const badge = document.querySelector('#unread-count');
+  if (badge) badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+}
+
 async function messagesMenu() {
   document.querySelector('#messages-modal')?.remove();
   document.body.insertAdjacentHTML('beforeend', '<div id="messages-modal" class="fixed inset-0 z-30 grid place-items-center bg-black/70 p-5 backdrop-blur-sm"><section class="glass flex max-h-[min(700px,calc(100vh-40px))] w-full max-w-2xl flex-col rounded-3xl p-6"><div class="mb-5 flex items-center justify-between"><div><div class="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Your inbox</div><h2 class="mt-1 font-display text-xl font-bold">Messages</h2></div><button id="close-messages" class="grid h-8 w-8 place-items-center rounded-lg bg-white/5 text-slate-400">×</button></div><div id="inbox-list" class="min-h-32 flex-1 overflow-y-auto"><div class="p-6 text-center text-sm text-slate-500">Loading messages...</div></div></section></div>');
   document.querySelector('#close-messages').addEventListener('click', () => document.querySelector('#messages-modal').remove());
   try {
     const conversations = await getInbox();
+    setUnreadBadge(conversations);
     const list = document.querySelector('#inbox-list');
     list.innerHTML = conversations.length ? conversations.map((conversation) => `<button data-inbox-conversation="${esc(conversation.id)}" class="flex w-full items-center justify-between gap-4 border-b border-white/10 px-3 py-4 text-left hover:bg-white/5"><span class="min-w-0"><strong class="block truncate text-sm text-white">${esc(conversation.otherName)}</strong><span class="mt-1 block truncate text-xs text-slate-400">${esc(conversation.latest?.text || 'No messages yet')}</span></span>${conversation.unreadCount ? `<span class="grid h-6 min-w-6 place-items-center rounded-full bg-fuchsia-500 px-2 text-[10px] font-bold text-white">${conversation.unreadCount}</span>` : '<span class="text-[10px] text-slate-500">Read</span>'}</button>`).join('') : '<div class="p-6 text-center text-sm text-slate-500">Your inbox is empty.</div>';
     list.querySelectorAll('[data-inbox-conversation]').forEach((button) => button.addEventListener('click', () => {
